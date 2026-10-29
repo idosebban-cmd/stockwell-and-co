@@ -75,8 +75,8 @@ export default function App() {
         ]
       : mode === 'quick'
         ? [
-            { label: 'Retry same Saturday', onClick: () => { game.retrySameSaturday(); setDialog(null); }, primary: true },
-            { label: 'New Saturday (different demand and events)', onClick: () => { game.newSaturday(); setDialog(null); } },
+            { label: 'Retry same Saturday', onClick: () => { game.retrySameSaturday(); game.confirmSetup(recommendedSetup()); setDialog(null); }, primary: true },
+            { label: 'New Saturday (different demand and events)', onClick: () => { game.newSaturday(); game.confirmSetup(recommendedSetup()); setDialog(null); } },
             { label: 'Home', onClick: () => setMode('home') },
           ]
         : [
@@ -336,9 +336,9 @@ function QuickView({ game, reduced, bar, onHome }: { game: Game; reduced: boolea
             state={game.state}
             targets={QUICK_TARGETS}
             kicker={`Saturday · Quick play${game.record.seed === 1 ? '' : ` · seed ${game.record.seed}`}`}
-            primary={{ label: 'Try again ▶', onClick: game.retrySameSaturday }}
+            primary={{ label: 'Try again ▶', onClick: () => { game.retrySameSaturday(); game.confirmSetup(recommendedSetup()); } }}
             others={[
-              { label: 'New Saturday', onClick: game.newSaturday },
+              { label: 'New Saturday', onClick: () => { game.newSaturday(); game.confirmSetup(recommendedSetup()); } },
               { label: 'Home', onClick: onHome },
             ]}
           />

@@ -135,7 +135,7 @@ export type Tutorial = ReturnType<typeof useTutorial>;
 
 /** The action bar's main button during the guided shift. */
 export function lessonPrimary(t: Tutorial, onFullSaturday: () => void): PrimaryAction | null {
-  if (t.phase === 'basics' || t.phase === 'finished') return { label: 'Start a full Saturday ▶', onClick: onFullSaturday };
+  if (t.phase === 'basics' || t.phase === 'finished') return { label: 'Start the week ▶', onClick: onFullSaturday };
   if (t.phase === 'replay') return { label: 'Skip replay ▶', onClick: t.finishReplay };
   if (t.phase === 'results' && t.run) {
     const last = t.index === CORE_LESSONS - 1 || t.index === LESSONS.length - 1;
@@ -170,7 +170,7 @@ export function LessonPanel({ t, ctx, onFullSaturday }: { t: Tutorial; ctx: Pane
         <p className="panel-kicker">All lessons done</p>
         <h2>Ready for Saturday.</h2>
         <button type="button" className="btn-link" onClick={onFullSaturday}>
-          Start a full Saturday
+          Start the week
         </button>
       </div>
     );

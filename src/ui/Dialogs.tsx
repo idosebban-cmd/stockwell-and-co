@@ -38,8 +38,22 @@ export function Help({ onClose }: { onClose: () => void }) {
     <Modal title="How to play" onClose={onClose}>
       <div className="help">
         <p>
-          Run Stockwell &amp; Co for one Saturday, 09:00–17:00. Win with <strong>{money(T.operatingProfit)}</strong> operating profit, satisfaction{' '}
-          <strong>{T.satisfaction}+</strong> and wellbeing <strong>{T.wellbeing}+</strong>.
+          <strong>The week:</strong> run the shop from Sunday to Saturday. Each day has a profit goal. By Saturday night, aim for business value of{' '}
+          <strong>{money(CONFIG.campaign.objective.growth)}</strong> more than you started with, reputation <strong>{CONFIG.campaign.objective.reputation}+</strong> and
+          team wellbeing <strong>{CONFIG.campaign.objective.wellbeing}+</strong>. Days start short and quiet and get longer and busier; new things (deliveries,
+          prices, chilled food) arrive as you go.
+        </p>
+        <p>
+          <strong>Quick play:</strong> one Saturday, 09:00–17:00, in the fully fitted shop. Win with <strong>{money(T.operatingProfit)}</strong> operating profit,
+          satisfaction <strong>{T.satisfaction}+</strong> and wellbeing <strong>{T.wellbeing}+</strong>.
+        </p>
+        <h3>Each morning (the week)</h3>
+        <p>Check the forecast and confirm the recommended stock order (or adjust it). Nothing is bought until you open the shop.</p>
+        <h3>After closing (the week)</h3>
+        <p>
+          You keep cash and stock that is still in date. Staff rest overnight, but long days without breaks build up. Reputation moves part of the way towards how
+          customers felt that day. You can buy an improvement (another person, a third till, more shelving, a chilled department, better refrigeration) or save the
+          money.
         </p>
         <h3>Each hour</h3>
         <ol>

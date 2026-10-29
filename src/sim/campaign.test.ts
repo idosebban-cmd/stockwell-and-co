@@ -292,3 +292,57 @@ describe('the week', () => {
     expect(invested.days[6].result.walkouts).toBeLessThanOrEqual(base.days[6].result.walkouts);
   });
 });
+
+describe('default plans', () => {
+  it('are valid every hour of every day, with hires and only the tills that are installed', () => {
+    let c = newCampaign(1);
+    const hires: Record<number, string[]> = { 0: ['hire:bev', 'hire:tomasz'], 2: ['chilled', 'hire:dougie'] };
+    while (c.day < CAMPAIGN_DAYS) {
+      let state = startCampaignDay(c, recommendOrder(c));
+      while (state.hour < state.ctx.hours) {
+        const p = defaultPlan(state);
+        expect(planErrors(state, p)).toEqual([]);
+        state = runHour(state, p).state;
+      }
+      c = finishDay(c, state).camp;
+      for (const id of hires[c.day - 1] ?? []) c = buy({ ...c, cash: Math.max(c.cash, 2000) }, id as never);
+    }
+  });
+});
+
+describe('saves', () => {
+  const memory = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+  };
+  it('a saved week loads back exactly, between days and mid-shift', async () => {
+    const { saveCampaign, loadCampaign } = await import('./save');
+    const st = memory();
+    const rec = newCampaignRecord(2);
+    let rb = rebuildCampaign(rec);
+    rec.days.push({ setup: recommendOrder(rb.camp), plans: [], purchases: [], done: false });
+    rb = rebuildCampaign(rec);
+    rec.days[0].plans.push(sensible(rb.state!));
+    saveCampaign(st, { record: rec, draft: null });
+    const back = loadCampaign(st);
+    expect(back.problem).toBeNull();
+    expect(rebuildCampaign(back.file!.record).state!.cash).toBeCloseTo(rebuildCampaign(rec).state!.cash, 9);
+  });
+  it('an incompatible saved week is reset with an explanation, not silently', async () => {
+    const { loadCampaign, CAMPAIGN_KEY } = await import('./save');
+    const st = memory();
+    st.setItem(CAMPAIGN_KEY, JSON.stringify({ record: { version: 0, seed: 1, days: [] } }));
+    const r = loadCampaign(st);
+    expect(r.file).toBeNull();
+    expect(r.problem).toMatch(/earlier version/);
+  });
+  it('Quick play saves from before the week existed still load', async () => {
+    const { loadGame, SAVE_KEY } = await import('./save');
+    const { RECORD_VERSION } = await import('./game');
+    const { recommendedSetup } = await import('./engine');
+    expect(RECORD_VERSION).toBe(3);
+    const st = memory();
+    st.setItem(SAVE_KEY, JSON.stringify({ record: { version: 3, seed: 1, setup: recommendedSetup(), plans: [] }, draft: null, savedAt: '' }));
+    expect(loadGame(st)?.record.seed).toBe(1);
+  });
+});

@@ -155,12 +155,13 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
             )}
             <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the space and your cash.</p>
           </div>
+          <p className="week-goal">
+            <strong>This week:</strong> finish Saturday with business value {pounds(goal.target)}+ (now {pounds(goal.value)}), reputation {K.objective.reputation}+ (now{' '}
+            {Math.round(goal.reputation)}) and team {K.objective.wellbeing}+ (now {Math.round(goal.wellbeing)}).
+          </p>
           <details className="more">
-            <summary>The week’s goal</summary>
-            <p className="tiny">
-              Finish Saturday with business value of {pounds(goal.target)} or more (now {pounds(goal.value)}), reputation {K.objective.reputation}+ and team wellbeing {K.objective.wellbeing}+.
-              Business value is cash, plus stock and equipment at what they cost, minus any overdraft.
-            </p>
+            <summary>What is business value?</summary>
+            <p className="tiny">Cash, plus stock and equipment at what they cost, minus any overdraft. Buying stock or equipment moves money into the business; it doesn’t lose it.</p>
           </details>
         </div>
       )}

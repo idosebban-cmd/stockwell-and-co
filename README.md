@@ -1,8 +1,8 @@
 # Stockwell & Co
 
-A single-player browser game about running a small independent British supermarket through one busy Saturday. You make staffing and commercial decisions, run the next hour, watch what happens and adjust.
+A single-player browser game about running a small independent British supermarket. The main mode is **the week**: seven days, Sunday to Saturday, in the same shop. You start small (two departments, three staff, two tills), earn enough to improve the shop, and finish on the busiest day of the week. Each hour you make staffing and commercial decisions, run it, watch what happens and adjust.
 
-Eight hourly turns (09:00–17:00), three departments (fruit & veg, chilled food, cupboard essentials), six employees, limited cash. A first playthrough takes roughly 15–25 minutes.
+**Quick play** keeps the original standalone Saturday in the fully fitted shop: eight hourly turns, three departments, six employees. **Learn to play** is an optional five-minute set of lessons; the week also introduces things as it goes.
 
 ## Running it
 
@@ -27,21 +27,27 @@ npm run preview     # serve the production build
 npm run balance     # play full Saturdays with scripted strategies across seeds
 npm run consequence # one hour, one staffing change: preview and outcome side by side
 npm run pricing     # does one price level win everywhere? full days and set situations
+npm run campaign    # whole weeks with different investment paths (seeds as an argument: npm run campaign -- 1,2,3)
 ```
 
 The build is static (`dist/`, relative paths) and can be opened from any static file host. There is no backend, account or external asset.
 
 ## How to play
 
-1. **Opening.** New players see **Learn to play** (the main button) and **Full Saturday** beside it. Returning players see **Full Saturday** first and **Replay tutorial**. **Custom setup** (underneath) shows one department at a time in tabs: morning and midday quantities, chilled dates ("Expires tonight" £1.35 or "Keeps till Wednesday" £1.55), price tier, cost, space at opening and "Estimated overflow" at 12:00. Calculations sit behind **Details**; the order total, cash left and Start shift stay visible.
+1. **Home.** **Start the week** (or **Continue the week · Tuesday**), **Quick play: one Saturday**, and links to **Learn to play** and Quick play with a custom order. If a saved week can’t be continued with the current rules, the home screen says so instead of silently dropping it.
+1. **The week.** Each day has three parts.
+   - *Before opening:* the shop as it will open (today’s order on the shelves), opening hours, a short forecast, today’s goal, what is new today, the recommended stock order with its cost and cash after, and the week’s goal in one line. **Adjust** changes quantities (and chilled dates once there is chilled). Nothing is bought until **Open the shop**.
+   - *Trading:* the same shop screen as Quick play (below). The top bar shows today’s profit against today’s goal, reputation, the team over the week and business value against the week’s goal.
+   - *After closing:* **Shift complete** with the day’s three scores, one takeaway, cash and up to three improvements suggested by what happened (all improvements on request), **Next day**, **View report** and **Restart <day>**. Bought fixtures appear in the closing picture straight away and in the shop the next morning; new staff join the team as the same characters.
+   - After Saturday: **Week complete** with business value, reputation and team against the week’s goal, and a day-by-day report.
 2. **Learn to play** (about five minutes). Five lessons, each a 30-minute engine interval on a quiet, fixed Saturday with no purchases, promotions or faults: *Serve customers*, *Fill a shelf*, *Unload a delivery* (dock → stockroom → shelves), *Take a break* and *A trade-off* (two reasonable choices, compared side by side). Each lesson shows one instruction and highlights one target at a time: the person, then (once they are selected) the place they should go; other places show no hints. After running you get one sentence and the figures that decided it. You can **Try again** (same start, same customers, attempts compared in a table), **Skip** or exit at any time. Two optional pricing lessons follow with opposite answers: too much short-dated chilled in the last hour (the low price sells enough more to bin less and earn the most after waste) and too little fruit & veg (all prices sell out, so the high price earns more per item). Tutorial progress is stored separately from the game save; reloading restarts the current lesson.
 3. **Each hour.** The screen has three layers. *Always visible:* the illustrated shop, the top bar (time, cash, profit, customers, staff) and one action bar under the shop with a compact day timeline, **Needs attention · N**, **Team** and **Run next hour**. *On selection:* one panel on the right for whatever you selected (a person, a department, the tills, the dock, the break room, a problem); opening something else replaces it. *On request:* forecast (click the timeline), outlook estimates, price comparisons, staff specialities and detailed results. Fixtures carry no permanent counts, staff badges or name tags; a small “!” marks a fixture that needs attention (red when urgent), “Low”/“Empty” marks a shelf, “z” a tired person. Counts appear for the selected place; name and energy for the selected person. **Needs attention** lists the problems, most urgent first, and each opens its card: what is wrong, what is at risk, what happens if you wait, and only the responses that work here, with cost, staff and timing (the chiller fault card books the engineer, with undo, and shows who is moving stock to the cold room). Jobs are *Serve customers*, *Fill produce / chilled / grocery shelves*, *Unload delivery* and *Take a break*. Selecting someone shows their current job, energy and the rate they would achieve in each job (or why a job would achieve nothing, e.g. “Nothing on the dock to unload”); places in the shop are highlighted with the same figures. Each move is confirmed, with any change to the estimate (“Mags will unload deliveries next hour. Estimate: Delivery dock: short → OK.”). Prices: a department shows its current price; **Change prices** opens the Low / Regular / High comparison (price, margin, estimated units sold, gross profit; waste, after-waste profit, leftovers and customer mood under Details) with a one-line trade-off from the figures. No price is marked best. Spending and cash after show beside the run button. R runs the hour, Escape clears a selection.
 4. **Replay and results.** The replay is labelled “Replay of what happened” with its clock, and can be skipped. Planning then resumes with a short summary in the panel: at most three outcomes, each from recorded data (for example “Unloaded 288”, “201 chilled items wanted weren’t on the shelf”, “Served 80 customers; nobody gave up”), with matching tags in the shop beside the shelf, dock or till. **View details** has the full breakdown; dismissing it, or selecting anything, clears the summary and the tags.
-5. **Closing.** Accounts, cash and remaining stock, targets, the three biggest effects on profit, and missed opportunities drawn from the day's data. **Retry same Saturday** replays identical customers and events; **New Saturday** uses a new seed.
+5. **Closing (both modes).** **Shift complete**, how many targets were met, three scores with their targets (Profit, Customers, Staff), one takeaway from the recorded results and the main action (**Next day** in the week, **Try again** in Quick play), all on one laptop screen. **View report** opens tabs: *Accounts* (profit breakdown, cash, stock left; business value in the week), *Operations* (customers, availability, money actually spent, estimated profit missed and missed opportunities, kept apart) and *Team* (hours, breaks, energy, quiet hours). The advice only suggests what was possible at the time (no emergency order that would arrive after closing), treats repairs as costs rather than mistakes, and names a cause for a missed target only when the recorded figures support it.
 
 Profit is shown as progress towards the £800 target ("£289 / £800") and stays neutral until closing; cash is a separate indicator.
 
-**Win** with operating profit of £800 or more, customer satisfaction of 70 or more and staff wellbeing of 60 or more.
+**The week’s goal** (shown from the first morning): finish Saturday with business value at least £1,500 above the start (£1,770 → £3,270), reputation 65+ and team wellbeing 60+. Each day also has its own profit goal. **Quick play** is won with operating profit of £800 or more, customer satisfaction of 70 or more and staff wellbeing of 60 or more.
 
 ## Design in brief
 
@@ -57,12 +63,39 @@ Profit is shown as progress towards the £800 target ("£289 / £800") and stays
 - **Events.** At most two per Saturday: an unexpected rush (announced two hours ahead), a delayed midday delivery (announced an hour ahead), and a chiller fault (half the chilled shelf out of use: rescue the stock with staff, call the engineer, or both). No unannounced event lands in the last two hours. The first Saturday is curated: a chiller fault at 11:00 and a rush at 14:00.
 - **Determinism.** The seed fixes the demand variation and events. A game is stored as seed + setup + committed hourly plans and rebuilt by replaying them, so the same decisions always give the same result. The replay animation only displays recorded steps and cannot affect results.
 
+## The week in brief
+
+- **Pacing.** Every day opens at 09:00 and runs for its real trading hours, so wages, fatigue, costs and demand are per hour throughout. Sunday 4 hours (about 90 customers), Monday 5, Tuesday and Wednesday 6, Thursday and Friday 7, Saturday 8 (the Quick play Saturday’s demand, about 440 customers). Patterns differ: Wednesday is busiest first thing (market day), Thursday rises after work, Friday is steady and busy, Saturday peaks at lunchtime with an announced rush.
+- **Introductions in play.** Sunday: serve, fill shelves, breaks (no deliveries during the day, prices fixed). Monday: a midday delivery to unload, emergency orders. Tuesday: prices, markdowns and promotions. Wednesday: the chilled department can be bought; agency temps. Announced disruptions: a late lorry on Wednesday, the after-work rush on Thursday, a rattling chiller on Friday (only if the shop has chilled cabinets without better refrigeration), Saturday’s rush.
+- **What carries over.** Cash; stock with its date (stock is dated “use by <day>”; whatever is past its date before the next opening is binned at closing, and nothing else is); the night crew puts dock stock away where there is room (chilled that doesn’t fit is binned, the rest waits on the dock); fruit & veg ages 3% overnight; installed equipment; staff and their specialities; reputation; prices.
+- **People.** Energy recovers overnight, but 40% of each person’s strain carries into the next day and lowers their morning energy (up to −25). Team wellbeing over the week is based on that carried strain, so a run of long days without breaks shows up even after a good night.
+- **Reputation.** Starts at 70. Each day moves it 40% of the way towards that day’s customer satisfaction. Footfall follows it gently (between −12% and +12%), so a poor day costs customers without ending the week.
+- **Orders.** The recommended order is the forecast at today’s prices, less stock already in the shop, within the shelf and stockroom space, and split between the morning delivery and the midday lorry when there is one. It can use the £500 overdraft (the screen says so); one hour of wages and costs is kept back. Nothing is bought without confirming.
+- **Improvements** (any order, none required; each shows upfront cost, running cost, effect and cash after):
+
+  | Improvement | Cost | Running cost | Effect |
+  |---|---|---|---|
+  | Hire Bev, Tomasz or Dougie | £60 induction | £12.60 an hour on shift | Another person, with their speciality |
+  | Third till | £450 | — | Up to 30 more customers an hour, when staffed |
+  | More fruit & veg display | £280 | — | Shelf 200 → 300 (a third row of crates) |
+  | Third grocery aisle | £320 | — | Shelf 400 → 600 |
+  | Chilled department (from Wednesday) | £850 | £18 a day | Two cabinets and a cold room; half the chilled range |
+  | Two more chilled cabinets | £350 | £6 a day | Chilled shelf 130 → 260 and the full range |
+  | Better refrigeration | £300 | — | No cabinet faults; chilled on the dock spoils half as fast |
+
+- **Accounting.** Business value = cash + usable stock at cost + equipment at purchase cost − overdraft. Buying stock or equipment moves cash into stock or equipment; it is not an expense. Stock becomes a cost when sold (cost of goods) or written off (waste). Wages, rent and rates (£90 a day), energy and other costs (£14 per trading hour), running costs and a hire’s induction fee are operating costs. Daily operating profit and business value are shown separately; the breakdown is behind **View report**.
+- **Failure** only when cash at closing is below the £500 overdraft, i.e. the shop can’t pay for tomorrow. Any day can be restarted from its morning.
+- **Saving.** The week is stored as decisions (each day’s order, hourly plans and purchases) under its own key and rebuilt by replaying them, so reloading between days or mid-shift and restarting a day are exact. Quick play saves are unchanged and still load.
+
 ## Code layout
 
 ```
 src/sim/            Pure TypeScript simulation (no DOM, no timers)
   config.ts         All balancing parameters, with comments
-  engine.ts         startDay, runHour, plan validation, action rules, queries
+  engine.ts         startDay (Quick play) / startShift (any day), runHour, plan validation, action
+                    rules, queries; every shift has a DayContext (hours, departments, tills, space…)
+  campaign.ts       The week: persistent state, each day's shop and forecast, recommended orders,
+                    closing, investments, business value, the decision record and rebuild
   stock.ts          Batch operations (FIFO/expiry/share), used for conservation
   scenario.ts       Seeded scenarios; seed 1 is the curated first Saturday
   roster.ts         The six employees, specialities and default jobs
@@ -70,22 +103,23 @@ src/sim/            Pure TypeScript simulation (no DOM, no timers)
   insight.ts        Estimates for the UI from engine runs: outlook, job previews, problems,
                     chiller-fault facts, price comparison, interval outcomes
   tutorial.ts       Lessons: controlled starting states, objectives, checks and results
-  summary.ts        Closing accounts, biggest factors, missed opportunities
+  summary.ts        Closing scores, the takeaway, accounts, costs vs estimates, missed opportunities
   game.ts           Game record (seed + decisions) and rebuild-by-replay
   save.ts           localStorage autosave and settings, failure-tolerant
   bots.ts           Scripted strategies for tests and balance runs
-  sim.test.ts       Vitest suite (tutorial.test.ts: lessons and insight)
+  sim.test.ts       Vitest suite (tutorial.test.ts: lessons and insight; campaign.test.ts: the week)
 src/ui/             React components: ShopScreen.tsx (shop, action bar and one contextual panel, shared by the game
                     and the tutorial), Tutorial.tsx (lesson panel and progress), Store.tsx (illustrated shop), art/Characters.tsx (staff and
                     shoppers), PlanPanel.tsx (staff, context card, prices and actions), activity.ts
-                    (staff activity from replay snapshots), setup, results, closing, dialogs
+                    (staff activity from replay snapshots), Closing.tsx (result and report),
+                    CampaignScreens.tsx (before opening, offers, end of week), useCampaign.ts, setup, dialogs
 src/App.tsx         Phases, replay timer, keyboard shortcuts
 scripts/            Balance and playtest scripts (run with vite-node)
 ```
 
 ## Provisional balance
 
-All in `src/sim/config.ts`. Highlights:
+All in `src/sim/config.ts` (the week under `campaign`). Quick play highlights:
 
 | Parameter | Value |
 |---|---|
@@ -103,7 +137,30 @@ All in `src/sim/config.ts`. Highlights:
 | Wages and overheads | £12.60/hour each; £680/day overheads |
 | Targets | profit £800 · satisfaction 70 · wellbeing 60 |
 
-With these values the scripted "sensible" manager wins the curated Saturday (about £1,100, satisfaction 79, wellbeing 90) and 19 of 20 generated Saturdays in the test sample. That is probably slightly generous for a real first-time player, and is the first thing to check in playtesting. Keeping one till, never refilling shelves, never taking breaks, or accepting the default plan every hour all lose (see `npm run balance` and the balance tests).
+With these values the scripted "sensible" manager wins the Quick play curated Saturday (about £1,100, satisfaction 79, wellbeing 90) and 19 of 20 generated Saturdays in the test sample. That is probably slightly generous for a real first-time player, and is the first thing to check in playtesting. Keeping one till, never refilling shelves, never taking breaks, or accepting the default plan every hour all lose (see `npm run balance` and the balance tests).
+
+### The week
+
+`npm run campaign` plays whole weeks with the scripted manager and different investment paths (seeds 1–3):
+
+| Path | Business value (goal £3,270) | Reputation | Team | Result |
+|---|---|---|---|---|
+| Saver (buys nothing) | about £2,900 | about 60 | 0 | Misses: three people can’t keep up and never get a break |
+| Staff (Bev, Tomasz, third till) | about £3,600–3,700 | 76–77 | 89 | Wins |
+| Chilled (chilled, Dougie, refrigeration) | about £4,000–4,100 | 66–67 | 90 | Wins |
+| Shelves (both displays, then Bev) | about £3,950–4,000 | 74–75 | 89–90 | Wins |
+| Balanced (Bev, chilled, third till, Dougie) | about £3,150–3,330 | 64–66 | 90 | Wins 2 of 3 |
+
+Chilled is never required. A poor Sunday and Monday (nobody filling shelves) can still finish with the goal met (tested). Daily profit goals are £20, £40, £110, £140, £170, £220 and £320.
+
+Assumptions most in need of human playtesting:
+
+- Whether £1,500 of growth is the right goal for real players. The scripted manager is mechanical: better than people at some things (it never forgets the dock), worse at others (it plays the same way every hour).
+- Whether the chilled department feels worth £850. With two cabinets it carries half the range, so it pays slowly until the second pair of cabinets; with too few staff it stretches every shelf.
+- Whether the start (three people, two tills) is tight in an interesting way, or just leaves no room for breaks.
+- Reputation pull (40% a day) and the overnight fatigue carry (40%): whether one bad day feels fair and recoverable.
+- The overdraft-backed recommended order: whether players understand the shop can briefly go below zero.
+- Hire cost (£60 plus wages) versus equipment: hires look cheap upfront but cost every hour; whether that is visible enough.
 
 ## Accessibility
 
@@ -119,20 +176,23 @@ With these values the scripted "sensible" manager wins the curated Saturday (abo
 - Dragging staff is not implemented; click-to-assign and the drop-downs cover everything.
 - Balance has been tuned with scripted strategies, not yet with human players. The generated Saturdays (New Saturday) vary demand and events within limits, but haven't been hand-checked as much as the curated one.
 - Desktop-first. The layout stacks on narrow screens but isn't designed for phones.
-- Saves from an incompatible version (including those from before the price-level change) are discarded rather than migrated.
+- Quick play saves from an incompatible version (before the price-level change) are discarded rather than migrated. A saved week that can’t be continued is reset with a message on the home screen.
+- The week has fixed days and demand patterns; only the hidden variation changes with the seed. There is no free placement of fixtures, no loans and no second week with the same shop.
 
 ## Playtest questions
 
 The central question: **does changing a staffing or commercial decision create an understandable, interesting consequence elsewhere in the shop?** For example, `npm run consequence` takes the 12:00 hour of the first Saturday and moves one person from tills to receiving. The preview warns "Checkout capacity is likely to fall short", and the result shows 7 walk-outs and about £100 of abandoned shopping, where the original plan had none.
 
+For the week: does “I earned enough to improve my shop, I can see the difference, and I want to play tomorrow” happen? Do players understand why a day went badly from the takeaway alone? Do the offers feel relevant to what just happened?
+
 Also worth watching for: whether the three-layer screen still shows enough without clicking (or hides something people needed); whether pricing feels like a real choice; whether the tutorial is enough to play a full Saturday without help; whether problems are recognised from the shop and the cards; whether the midday delivery and unloading make sense; whether breaks feel worth their cost; whether the markdown and chiller decisions feel like real choices.
 
 ## Status: implemented vs provisional
 
-Implemented and covered by tests: the simulation (stock, perishables, queues, money, staff, events, interventions), short intervals (`runSteps`, with full hours checked identical to before), the chilled shelf-life choice, the midday room estimate, determinism, save/load, the reconciliation between replay snapshots and hour results, the tutorial lessons (the guided action passes, the starting plan fails, both trade-off choices give different recorded results, pricing lessons order as described), and the insight layer (job previews and blocked reasons, outlook changes, problems, chiller-fault facts matching the engine, outcomes tied to report data).
+Implemented and covered by tests: the simulation (stock, perishables, queues, money, staff, events, interventions), short intervals, Quick play unchanged by the campaign work (`scripts/quickplay-hash.ts` fingerprints 16 Saturdays by their numbers), the tutorial lessons and insight layer, the pricing economics, and the week: carrying cash, dated stock and upgrades forward; overnight expiry, recovery and carried fatigue; reputation; wages for hires and running costs; locked departments, uninstalled tills and fixed prices; purchases that can’t be duplicated, made without the cash, made too early or without their prerequisite; recommended orders within funds and space and adapting to stock on hand; default plans valid every hour; rebuilding between days and mid-shift; restarting a day; saving and loading the week; incompatible week saves reported; old Quick play saves still loading; three investment paths completing the week; recovery from a poor start; closing advice (no late emergency orders, costs apart from estimates, repairs not mistakes, causes only when big enough).
 
-Checked by scripted browser play-throughs at 1366×768 (the tutorial end to end including a retry, a reload and both pricing lessons; a full curated Saturday to the closing screen from saved states and from the opening screen; the busiest planning state at 14:00 with the chiller fault, a full dock and the rush; no console errors, no page scroll) but not by unit tests: the panels, cards, highlights, toasts, replay labels and keyboard shortcuts. The pricing economics are unit-tested: no price wins every situation, the scarce lesson sells out at every price, the surplus lesson favours the low price after waste, and fuller baskets slow the tills.
+Checked by scripted browser play-throughs at 1366×768, with no console errors: the whole week from the home screen (buying a hire and chilled, a reload mid-shift on Thursday that resumed at the same hour, restarting Friday, Saturday and the week result); winning weeks loaded from saves through to **Week complete**; the busiest states (Friday with the full team, Saturday’s rush with four chilled cabinets); the closing screen fitting one screen without scrolling in both modes; the tutorial end to end; Quick play to closing and **Try again**.
 
-Not shown by any of this: whether the game is intuitive or fun. That needs people playing it.
+Not shown by any of this: whether the week is fun or makes people want to play tomorrow. That needs people playing it.
 
-Provisional: all balance values in `src/sim/config.ts` (tuned with scripted strategies, not people); the outlook is an estimate from the forecast and ignores hidden variation; the art is simple SVG and character sizes are small at laptop width; the representative aisle shoppers.
+Provisional: all balance values in `src/sim/config.ts` (tuned with scripted strategies, not people); the outlook is an estimate from the forecast; the art is simple SVG and character sizes are small at laptop width.

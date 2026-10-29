@@ -1281,9 +1281,9 @@ export function defaultPlan(state: SimState): HourPlan {
   for (const s of onShift(state)) {
     let a: AssignmentId = s.lastAssignment === 'break' ? 'tills' : s.lastAssignment;
     if (s.isTemp && s.availableFrom === state.hour) a = 'tills';
-    if ((counts.get(a) ?? 0) >= assignmentLimit(a)) {
+    if ((counts.get(a) ?? 0) >= assignmentLimit(a, state)) {
       const alt = (['replenish:ambient', 'replenish:produce', 'replenish:chilled', 'receive', 'tills'] as AssignmentId[]).find(
-        (x) => (counts.get(x) ?? 0) < assignmentLimit(x),
+        (x) => (counts.get(x) ?? 0) < assignmentLimit(x, state),
       );
       a = alt ?? 'break';
     }
