@@ -1,57 +1,60 @@
-import { CONFIG } from '../sim/config';
-import { money } from '../sim/engine';
-import { makeScenario } from '../sim/scenario';
 import { Shopper, StaffFigure } from './art/Characters';
 
-/** First screen: the shopfront, one sentence and one button. */
+/** First screen: the shopfront, one sentence and the ways in. */
 export function Opening({
-  seed,
-  onStart,
+  week,
+  onWeek,
+  onQuick,
+  quickInProgress,
   onCustom,
   onLearn,
-  returning,
+  notice,
+  onDismissNotice,
 }: {
-  seed: number;
-  onStart: () => void;
+  /** "Start the week" or the day to continue. */
+  week: { label: string; continuing: boolean };
+  onWeek: () => void;
+  onQuick: () => void;
+  quickInProgress: boolean;
   onCustom: () => void;
   onLearn: () => void;
-  returning: boolean;
+  notice: string | null;
+  onDismissNotice: () => void;
 }) {
-  const scenario = makeScenario(seed);
   return (
     <main className="opening" id="main">
       <Shopfront />
       <div className="opening-copy">
         <h1>Stockwell &amp; Co</h1>
         <p className="opening-line">
-          {scenario.curated ? '' : `${scenario.name}. `}Run the shop through one busy Saturday and close with {money(CONFIG.targets.operatingProfit)} profit, happy
-          customers and a team still standing.
+          Run the shop for a week, Sunday to Saturday. Earn enough to improve it, and finish Saturday with a stronger business, happy customers and a team still
+          standing.
         </p>
+        {notice && (
+          <p className="opening-notice" role="status">
+            {notice}{' '}
+            <button type="button" className="btn-link" onClick={onDismissNotice}>
+              OK
+            </button>
+          </p>
+        )}
         <div className="opening-buttons">
-          {returning ? (
-            <>
-              <button type="button" className="btn-primary btn-start" onClick={onStart} autoFocus>
-                Full Saturday
-              </button>
-              <button type="button" className="btn-secondary btn-start-2" onClick={onLearn}>
-                Replay tutorial
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn-primary btn-start" onClick={onLearn} autoFocus>
-                Learn to play
-              </button>
-              <button type="button" className="btn-secondary btn-start-2" onClick={onStart}>
-                Full Saturday
-              </button>
-            </>
-          )}
+          <button type="button" className="btn-primary btn-start" onClick={onWeek} autoFocus>
+            {week.label}
+          </button>
+          <button type="button" className="btn-secondary btn-start-2" onClick={onQuick}>
+            {quickInProgress ? 'Continue Quick play' : 'Quick play: one Saturday'}
+          </button>
         </div>
-        {!returning && <p className="tiny muted">Learn to play: five short lessons, about five minutes.</p>}
-        <button type="button" className="btn-link" onClick={onCustom}>
-          Custom setup
-        </button>
+        <p className="tiny muted">The week teaches as it goes. Prefer a guided start?</p>
+        <div className="opening-links">
+          <button type="button" className="btn-link" onClick={onLearn}>
+            Learn to play (five short lessons)
+          </button>
+          <button type="button" className="btn-link" onClick={onCustom}>
+            Quick play with a custom order
+          </button>
+        </div>
       </div>
     </main>
   );

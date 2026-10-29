@@ -547,12 +547,13 @@ describe('balance: complete shifts', () => {
     const { state } = playShift(SEED, oneTill);
     expect(satisfactionSoFar(state)).toBeLessThan(CONFIG.targets.satisfaction);
     expect(operatingProfit(state)).toBeLessThan(CONFIG.targets.operatingProfit);
-    expect(summarise(state).factors[0].label).toMatch(/walk-outs/i);
+    expect(summarise(state).estimates[0].label).toMatch(/gave up queueing/i);
+    expect(summarise(state).takeaway).toMatch(/abandoned their queues/);
   });
   it('neglecting replenishment empties shelves and loses money', () => {
     const { state } = playShift(SEED, noReplenishment);
     expect(operatingProfit(state)).toBeLessThan(0);
-    expect(summarise(state).factors.map((f) => f.label).join(' ')).toMatch(/Empty shelves/);
+    expect(summarise(state).estimates.map((f) => f.label).join(' ')).toMatch(/Empty shelves/);
   });
   it('doing nothing at all loses', () => {
     expect(won(playShift(SEED, passive).state)).toBe(false);
@@ -642,5 +643,34 @@ describe('short intervals', () => {
     const r = runSteps(s, defaultPlan(s), 5);
     expect(r.report.toStep).toBe(6);
     expect(r.state.hour).toBe(1);
+  });
+});
+
+describe('closing advice', () => {
+  it('never suggests an emergency order that would arrive after closing', () => {
+    for (const seed of [1, 2, 3, 42]) {
+      const late = recommendedSetup();
+      late.orders.ambient.morning = 300;
+      late.orders.ambient.midday = 0;
+      const { state } = playShift(seed, passive, late);
+      for (const m of summarise(state).missed) {
+        const hit = m.match(/would have arrived at (\d\d):00/);
+        if (hit) expect(Number(hit[1])).toBeLessThan(CONFIG.openingHour + state.ctx.hours);
+      }
+    }
+  });
+  it('keeps money spent apart from estimated lost margin, and does not treat a repair as a mistake', () => {
+    const { state } = playShift(SEED, sensible);
+    const s = summarise(state);
+    expect(s.actionCosts.find((c) => c.label === 'Chiller repair')?.note).toMatch(/Restored/);
+    expect(s.missed.join(' ')).not.toMatch(/engineer/i);
+    for (const e of s.estimates) expect(s.extras.map((x) => x.label)).not.toContain(e.label);
+  });
+  it('names a cause for a missed profit target only when it is big enough to explain it', () => {
+    const { state } = playShift(SEED, noReplenishment);
+    const s = summarise(state, { profit: 800, satisfaction: 0, wellbeing: 0 });
+    const shortfall = 800 - s.operatingProfit;
+    if (s.estimates[0] && s.estimates[0].amount >= shortfall) expect(s.takeaway).toMatch(/estimate/);
+    else expect(s.takeaway).toMatch(/no single cause|written off/);
   });
 });

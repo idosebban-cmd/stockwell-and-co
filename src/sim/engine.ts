@@ -38,6 +38,7 @@ export const QUICK_CONTEXT: DayContext = {
   depts: [...DEPTS],
   tills: C.checkout.tills,
   shelfCap: { produce: C.departments.produce.shelfCapacity, chilled: C.departments.chilled.shelfCapacity, ambient: C.departments.ambient.shelfCapacity },
+  range: { produce: 1, chilled: 1, ambient: 1 },
   backroomCap: { produce: C.departments.produce.backroomCapacity, chilled: C.departments.chilled.backroomCapacity, ambient: C.departments.ambient.backroomCapacity },
   dockSpoil: { produce: C.departments.produce.dockSpoilPerHour, chilled: C.departments.chilled.dockSpoilPerHour, ambient: C.departments.ambient.dockSpoilPerHour },
   middayHour: C.openingOrder.middayHour,
@@ -115,7 +116,7 @@ export function middayRoomEstimate(setup: SetupPlan, forecast: readonly number[]
   const ctx = basis.ctx;
   const mid = ctx.middayHour ?? ctx.hours;
   let sales = 0;
-  for (let h = 0; h < mid; h++) sales += forecast[h] * cfg.basket * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
+  for (let h = 0; h < mid; h++) sales += forecast[h] * cfg.basket * ctx.range[dept] * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
   const opening = basis.carried[dept] + Math.max(0, Math.round(setup.orders[dept].morning));
   const expectedLeft = Math.max(0, opening - sales);
   const room = Math.max(0, ctx.shelfCap[dept] + ctx.backroomCap[dept] - expectedLeft);
@@ -123,7 +124,7 @@ export function middayRoomEstimate(setup: SetupPlan, forecast: readonly number[]
   let clearsBy: number | null = overflow > 0 ? null : mid;
   let later = 0;
   for (let h = mid; h < ctx.hours && clearsBy === null; h++) {
-    later += forecast[h] * cfg.basket * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
+    later += forecast[h] * cfg.basket * ctx.range[dept] * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
     if (later >= overflow) clearsBy = h + 1;
   }
   return { expectedLeft, room, overflow, clearsBy };
@@ -245,6 +246,7 @@ export function startShift(input: ShiftInput): SimState {
     hour: 0,
     step: 0,
     cash: input.cash - check.cost,
+    cashBeforeOrder: input.cash,
     openingInventoryValue,
     ledger: { revenue: 0, cogs: 0, waste: 0, wages: 0, extras: {}, stockPurchases: check.cost },
     stock,
@@ -903,7 +905,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       const st = state.stock[d];
       // The markdown boost lasts only while yellow-stickered stock remains.
       const stepMult = mdOn[d] && shortDatedUnits(state, d) > 0 ? mdMult[d] : plainMult[d];
-      const wanted = hasDept(state, d) ? arrivals * C.departments[d].basket * stepMult : 0;
+      const wanted = hasDept(state, d) ? arrivals * C.departments[d].basket * state.ctx.range[d] * stepMult : 0;
       const picked = Math.min(wanted, S.total(st.shelf));
       // Most shoppers take from the front; some reach for the freshest at the back.
       S.add(state.queue.baskets[d], S.take(st.shelf, picked * C.demand.rotation));
@@ -1197,7 +1199,7 @@ function hourSatisfaction(
 ): { score: number; reasons: Reason[] } {
   const SC = C.satisfaction;
   const reasons: Reason[] = [];
-  const weights = perDept((d) => C.departments[d].basket * mult[d]);
+  const weights = perDept((d) => C.departments[d].basket * state.ctx.range[d] * mult[d]);
   const wsum = DEPTS.reduce((t, d) => t + weights[d], 0);
   let score: number = SC.base;
   for (const d of DEPTS) {
@@ -1260,6 +1262,12 @@ export function money(x: number): string {
   const v = Math.abs(x);
   const s = v >= 100 ? `£${Math.round(v).toLocaleString('en-GB')}` : `£${v.toFixed(2)}`;
   return neg ? `−${s}` : s;
+}
+
+/** Whole pounds, for targets and goals: "£60", "£1,500". */
+export function pounds(x: number): string {
+  const v = `£${Math.round(Math.abs(x)).toLocaleString('en-GB')}`;
+  return x < -0.5 ? `−${v}` : v;
 }
 
 export function pct(x: number): string {

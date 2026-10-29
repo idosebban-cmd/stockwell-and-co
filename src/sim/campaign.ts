@@ -21,6 +21,7 @@ import {
   money,
   operatingProfit,
   perDept,
+  pounds,
   runHour,
   satisfactionSoFar,
   startShift,
@@ -163,6 +164,8 @@ export function dayContext(camp: CampaignState): DayContext {
     depts,
     tills: K.startTills + (owns(camp, 'till3') ? 1 : 0),
     shelfCap: shelf,
+    // Two chilled cabinets carry half the range, so shoppers want half as much chilled.
+    range: { produce: 1, ambient: 1, chilled: !depts.includes('chilled') ? 0 : owns(camp, 'shelfChilled') ? 1 : K.smallChilledRange },
     backroomCap: perDept((d) => (depts.includes(d) ? K.backroom[d] : 0)),
     dockSpoil: perDept((d) => C.departments[d].dockSpoilPerHour * (d === 'chilled' && owns(camp, 'fridge') ? K.fridgeDockSpoilMult : 1)),
     middayHour: cfg.middayHour,
@@ -240,7 +243,7 @@ export function carriedQty(camp: CampaignState): Record<DeptId, number> {
 
 export function dayIntro(camp: CampaignState, scenario: Scenario): string[] {
   const cfg = dayConfig(camp.day);
-  const out = [`${weekdayName(camp.day)}: open ${cfg.hours} hours, until ${String(9 + cfg.hours).padStart(2, '0')}:00. Today’s goal: ${money(cfg.profitTarget)} profit.`, cfg.intro];
+  const out = [`${weekdayName(camp.day)}: open ${cfg.hours} hours, until ${String(9 + cfg.hours).padStart(2, '0')}:00. Today’s goal: ${pounds(cfg.profitTarget)} profit.`, cfg.intro];
   if (scenario.events.some((e) => e.kind === 'fridgeFault')) out.push('The chiller compressor is rattling. The engineer is on call if it gives up.');
   return out;
 }
@@ -290,13 +293,15 @@ export function recommendOrder(camp: CampaignState): SetupPlan {
   const orders = perDept(() => ({ morning: 0, midday: 0 }));
   const round10 = (x: number) => Math.max(0, Math.floor(x / 10) * 10);
   for (const d of ctx.depts) {
-    const per = C.departments[d].basket * tierDemand(d, pricing[d]) * tripMultiplier(pricing, d);
+    const per = C.departments[d].basket * ctx.range[d] * tierDemand(d, pricing[d]) * tripMultiplier(pricing, d);
     const upTo = (h: number) => sc.forecast.slice(0, h).reduce((t, x) => t + x, 0) * per;
     const cover = d === 'ambient' ? 1.15 : 1.03;
     const total = upTo(ctx.hours) * cover;
     const space = Math.max(0, ctx.shelfCap[d] + ctx.backroomCap[d] - have[d]);
     const want = Math.max(0, total - have[d]);
-    const morning = Math.min(space, want);
+    // With a midday lorry, the morning delivery covers the hours until just after it arrives; the rest comes at midday.
+    const morningWant = mid === null ? want : Math.max(0, upTo(Math.min(ctx.hours, mid + 1)) * cover - have[d]);
+    const morning = Math.min(space, want, morningWant);
     orders[d].morning = round10(morning);
     if (mid !== null) {
       const soldByMid = upTo(mid);
@@ -436,6 +441,8 @@ export interface Offer {
   /** Running cost, in words ("£12.60 an hour on shift"), or null. */
   recurring: string | null;
   effect: string;
+  /** A few words for the compact offer card. */
+  brief: string;
   available: boolean;
   reason: string | null;
   cashAfter: number;
@@ -466,6 +473,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
       cost: U.hire.cost,
       recurring: `${money(C.wagePerHour)} an hour on shift`,
       effect: `One more pair of hands every day. ${SPECIALITY_TEXT[r.speciality]}.`,
+      brief: `Another pair of hands. ${SPECIALITY_TEXT[r.speciality].split(' (')[0]}.`,
       available: !ended && camp.cash >= U.hire.cost,
       reason: ended ?? (camp.cash < U.hire.cost ? `Needs ${money(U.hire.cost)}.` : null),
       cashAfter: camp.cash - U.hire.cost,
@@ -480,6 +488,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
       cost: U.till3.cost,
       recurring: null,
       effect: `A third checkout lane: serves up to ${C.checkout.customersPerHour} more customers an hour, when someone is on it.`,
+      brief: `Up to ${C.checkout.customersPerHour} more customers an hour, with someone on it.`,
       why: signals.queue,
       score: signals.queueScore + (camp.staff.length >= 4 ? 1 : 0),
     },
@@ -487,12 +496,12 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
   );
   add(
     'shelfProduce',
-    { name: U.shelfProduce.name, cost: U.shelfProduce.cost, recurring: null, effect: `Fruit & veg shelf holds ${U.shelfProduce.extra} more (${K.shelf.produce} → ${K.shelf.produce + U.shelfProduce.extra}).`, why: signals.empty.produce, score: signals.emptyScore.produce },
+    { name: U.shelfProduce.name, cost: U.shelfProduce.cost, recurring: null, effect: `Fruit & veg shelf holds ${U.shelfProduce.extra} more (${K.shelf.produce} → ${K.shelf.produce + U.shelfProduce.extra}).`, brief: `Shelf holds ${U.shelfProduce.extra} more fruit & veg.`, why: signals.empty.produce, score: signals.emptyScore.produce },
     ended,
   );
   add(
     'shelfAmbient',
-    { name: U.shelfAmbient.name, cost: U.shelfAmbient.cost, recurring: null, effect: `Cupboard shelves hold ${U.shelfAmbient.extra} more (${K.shelf.ambient} → ${K.shelf.ambient + U.shelfAmbient.extra}).`, why: signals.empty.ambient, score: signals.emptyScore.ambient },
+    { name: U.shelfAmbient.name, cost: U.shelfAmbient.cost, recurring: null, effect: `Cupboard shelves hold ${U.shelfAmbient.extra} more (${K.shelf.ambient} → ${K.shelf.ambient + U.shelfAmbient.extra}).`, brief: `Shelves hold ${U.shelfAmbient.extra} more cupboard items.`, why: signals.empty.ambient, score: signals.emptyScore.ambient },
     ended,
   );
   add(
@@ -501,7 +510,8 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
       name: U.chilled.name,
       cost: U.chilled.cost,
       recurring: `${money(U.chilled.perDay)} a day to run the cabinets`,
-      effect: `Two chilled cabinets and a cold room: a new range (about ${C.departments.chilled.basket} items per shopper at ${money(C.departments.chilled.standardPrice)}). Chilled spoils on the dock and needs filling like any shelf.`,
+      effect: `Two chilled cabinets and a cold room: a new range (about ${C.departments.chilled.basket * K.smallChilledRange} items per shopper at ${money(C.departments.chilled.standardPrice)}). Chilled spoils on the dock and needs filling like any shelf.`,
+      brief: `A new range: about ${C.departments.chilled.basket * K.smallChilledRange} more items per shopper.`,
       why: camp.day >= 3 ? 'Shoppers keep asking for milk and sandwiches.' : '',
       score: camp.day >= 3 ? 2 : 0.5,
     },
@@ -509,7 +519,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
   );
   add(
     'shelfChilled',
-    { name: U.shelfChilled.name, cost: U.shelfChilled.cost, recurring: `${money(U.shelfChilled.perDay)} a day to run`, effect: `Chilled shelf holds ${U.shelfChilled.extra} more (${K.shelf.chilled} → ${K.shelf.chilled + U.shelfChilled.extra}).`, why: signals.empty.chilled, score: signals.emptyScore.chilled },
+    { name: U.shelfChilled.name, cost: U.shelfChilled.cost, recurring: `${money(U.shelfChilled.perDay)} a day to run`, effect: `Chilled shelf holds ${U.shelfChilled.extra} more (${K.shelf.chilled} → ${K.shelf.chilled + U.shelfChilled.extra}), and the full range doubles what shoppers want from it.`, brief: `Full chilled range: twice the space and the sales.`, why: signals.empty.chilled, score: signals.emptyScore.chilled },
     ended ?? (owns(camp, 'chilled') ? null : 'Needs the chilled department.'),
   );
   add(
@@ -519,6 +529,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
       cost: U.fridge.cost,
       recurring: null,
       effect: `No more cabinet faults, and chilled stock waiting on the dock spoils half as fast.`,
+      brief: 'No cabinet faults; less spoilage on the dock.',
       why: owns(camp, 'chilled') && camp.day <= 5 ? 'The chiller compressor has started rattling.' : '',
       score: owns(camp, 'chilled') && camp.day <= 5 ? 2.5 : 0.3,
     },
@@ -646,7 +657,14 @@ export function rebuildCampaign(record: CampaignRecord): RebuiltCampaign {
     if (state.hour < state.ctx.hours) return { phase: 'trading', camp, dayStart, state, reports, result: null, previousState };
     const done = finishDay(camp, state);
     let after = done.camp;
-    for (const p of rec.purchases) after = buy(after, p);
+    for (const p of rec.purchases) {
+      // A purchase that no longer applies (e.g. its prerequisite was undone) is skipped.
+      try {
+        after = buy(after, p);
+      } catch {
+        /* skipped */
+      }
+    }
     if (after.failed) return { phase: 'failed', camp: after, dayStart, state, reports, result: done.result, previousState };
     if (!rec.done) return { phase: 'closed', camp: after, dayStart, state, reports, result: done.result, previousState };
     camp = after;

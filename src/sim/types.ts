@@ -151,6 +151,8 @@ export interface DayContext {
   /** Installed tills (each needs an operator). */
   tills: number;
   shelfCap: Record<DeptId, number>;
+  /** Share of the full range on sale (1 = the Saturday shop's range); scales the items shoppers want. */
+  range: Record<DeptId, number>;
   backroomCap: Record<DeptId, number>;
   /** Share per hour lost from stock left on the dock. */
   dockSpoil: Record<DeptId, number>;
@@ -175,6 +177,8 @@ export interface SimState {
   /** Ten-minute steps already played in the current hour (0..5). */
   step: number;
   cash: number;
+  /** Cash before the day's order was paid for. */
+  cashBeforeOrder: number;
   openingInventoryValue: number;
   ledger: Ledger;
   stock: Record<DeptId, DeptStock>;

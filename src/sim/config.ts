@@ -341,7 +341,7 @@ export const CONFIG = {
         middayHour: 2,
         pricing: false,
         actions: ['emergency'],
-        profitTarget: 60,
+        profitTarget: 40,
         intro: 'New today: a midday delivery arrives at 11:00. Someone has to unload it on the dock before the shelves can be filled from it.',
         events: [],
       },
@@ -416,6 +416,8 @@ export const CONFIG = {
       fridge: { name: 'Better refrigeration', cost: 300, perDay: 0, from: 2, equipment: true },
       hire: { name: 'Hire', cost: 60, perDay: 0, from: 0, equipment: false },
     },
+    /** Share of the chilled range two cabinets carry (four carry it all). */
+    smallChilledRange: 0.5,
     /** Better refrigeration: no cabinet faults, and chilled on the dock spoils this much as fast. */
     fridgeDockSpoilMult: 0.5,
   },

@@ -4,7 +4,7 @@ import { assignmentLimit, deptUnits, markdownActive, onShift, perDept, promotion
 import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
-import { Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type JobHint, type ShopNotice, type StoreView, type ZoneId } from './Store';
+import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type JobHint, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
 import type { LessonFocus } from '../sim/tutorial';
 
@@ -59,11 +59,13 @@ interface Props {
   focus?: LessonFocus;
   /** Show the last interval's summary while planning the next one. */
   summaryOnPlan?: boolean;
+  /** False shows the shop without letting the player select or move anyone (before opening, between days). */
+  interactive?: boolean;
 }
 
 const STEP_MS = { normal: 800, fast: 380 };
 
-export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan }: Props) {
+export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true }: Props) {
   const [sel, setSelState] = useState<Selection>(null);
   const [toast, setToast] = useState<{ text: string; warn?: boolean } | null>(null);
   const [step, setStep] = useState(0);
@@ -141,14 +143,14 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
     (a: AssignmentId) => {
       if (!selectedId || !plan) return;
       const count = Object.entries(plan.assignments).filter(([id, x]) => x === a && id !== selectedId).length;
-      if (count >= assignmentLimit(a)) {
-        say(`${ASSIGNMENT_LABEL[a]} already has ${assignmentLimit(a)}. Move someone out first.`, true);
+      if (count >= assignmentLimit(a, state)) {
+        say(assignmentLimit(a, state) === 0 ? `The shop doesn’t have that yet.` : `${ASSIGNMENT_LABEL[a]} already has ${assignmentLimit(a, state)}. Move someone out first.`, true);
         return;
       }
       onPlanChange({ ...plan, assignments: { ...plan.assignments, [selectedId]: a } });
       setSelState(null);
     },
-    [selectedId, plan, onPlanChange, say],
+    [selectedId, plan, onPlanChange, say, state],
   );
 
   useEffect(() => {
@@ -180,11 +182,11 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
   }, [phase, selectedId, plan, state]);
 
   const problemZones = useMemo(() => {
-    if (phase !== 'plan' || !plan) return undefined;
+    if (phase !== 'plan' || !plan || !interactive) return undefined;
     const out: Partial<Record<ZoneId, 'urgent' | 'warn'>> = {};
     for (const p of computeProblems(state, plan)) if (out[p.zone] !== 'urgent') out[p.zone] = p.level;
     return out;
-  }, [phase, plan, state]);
+  }, [phase, plan, state, interactive]);
 
   // Lessons point at one thing at a time: the person, then (once selected) where they should go.
   const lessonTarget = useMemo(() => {
@@ -216,12 +218,13 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             staff={built.staff}
             assignments={built.assignments}
             activity={built.activity}
+            fit={fitFromContext(state.ctx)}
             selected={phase === 'plan' ? selectedId : null}
             onSelectStaff={(id) => setSel(selectedId === id ? null : { kind: 'staff', id })}
             onZone={onZone}
             context={phase === 'plan' ? contextZone : null}
             onContext={(z) => setSel(z && contextZone !== z ? { kind: 'zone', zone: z } : null)}
-            interactive={phase === 'plan'}
+            interactive={phase === 'plan' && interactive}
             animating={phase === 'replay'}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}
@@ -308,7 +311,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
     });
     const assignments = Object.fromEntries(report.staff.map((r) => [r.id, r.assignment]));
     const cap = perDept((d) =>
-      d === 'chilled' && s.fridgeFault ? CONFIG.departments.chilled.shelfCapacity * CONFIG.events.fridgeFault.capacityShare : CONFIG.departments[d].shelfCapacity,
+      d === 'chilled' && s.fridgeFault ? state.ctx.shelfCap.chilled * CONFIG.events.fridgeFault.capacityShare : state.ctx.shelfCap[d],
     );
     const abs = report.fromStep + step + 1;
     const mins = String(Math.min(abs, 6) * 10).padStart(2, '0');
@@ -342,7 +345,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
   const backroom = perDept((d) => deptUnits(state, d).backroom);
   const dock = DEPTS.reduce((t, d) => t + deptUnits(state, d).dock, 0);
   const planned = plan?.actions ?? [];
-  const clock = state.hour >= CONFIG.hours ? '17:00' : `${hourLabel(state.hour).slice(0, 2)}:${String((state.step ?? 0) * 10).padStart(2, '0')}`;
+  const clock = state.hour >= state.ctx.hours ? hourLabel(state.ctx.hours) : `${hourLabel(state.hour).slice(0, 2)}:${String((state.step ?? 0) * 10).padStart(2, '0')}`;
   const view = storeViewFromState({
     shelf,
     shelfCap,
@@ -365,3 +368,27 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
 }
 
 export { ZONE_NAME };
+
+/** A still picture of the shop (before opening, between days, at closing). */
+export function ShopPicture({ state, plan = null, label }: { state: SimState; plan?: HourPlan | null; label: string }) {
+  const built = buildView(state, 'plan', null, 0, plan, null);
+  return (
+    <div className="shop-picture" role="img" aria-label={label}>
+      <Store
+        view={built.view}
+        staff={built.staff}
+        assignments={built.assignments}
+        activity={built.activity}
+        fit={fitFromContext(state.ctx)}
+        selected={null}
+        onSelectStaff={() => {}}
+        onZone={() => {}}
+        context={null}
+        onContext={() => {}}
+        interactive={false}
+        animating={false}
+        reducedMotion
+      />
+    </div>
+  );
+}

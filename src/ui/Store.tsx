@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from 'react';
 import { CONFIG, DEPTS, type DeptId } from '../sim/config';
+import type { DayContext } from '../sim/types';
 import { assignmentLimit, productivity } from '../sim/engine';
 import { ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, StaffMember } from '../sim/types';
@@ -68,6 +69,31 @@ const NOTICE_AT: Record<ZoneId, [number, number]> = {
   tills: [600, 448],
 };
 
+/** What is installed, for drawing: fixtures occupy predefined places and appear when bought. */
+export interface ShopFit {
+  depts: DeptId[];
+  tills: number;
+  /** Rows of fruit & veg crates (2 or 3). */
+  produceRows: number;
+  /** Grocery aisles (2 or 3). */
+  aisles: number;
+  /** Chilled cabinets (0, 2 or 4). */
+  cabinets: number;
+  /** Better refrigeration installed. */
+  frost: boolean;
+}
+
+export function fitFromContext(ctx: DayContext): ShopFit {
+  return {
+    depts: ctx.depts,
+    tills: ctx.tills,
+    produceRows: ctx.shelfCap.produce > CONFIG.campaign.shelf.produce ? 3 : 2,
+    aisles: ctx.shelfCap.ambient > CONFIG.campaign.shelf.ambient ? 3 : 2,
+    cabinets: !ctx.depts.includes('chilled') ? 0 : ctx.shelfCap.chilled > CONFIG.campaign.shelf.chilled ? 4 : 2,
+    frost: ctx.dockSpoil.chilled < CONFIG.departments.chilled.dockSpoilPerHour,
+  };
+}
+
 /** What each staff member is doing: working, standing idle (nothing to do), or just planned. */
 export type Activity = 'work' | 'idle' | 'plan';
 
@@ -93,6 +119,7 @@ interface Props {
   problemZones?: Partial<Record<ZoneId, 'urgent' | 'warn'>>;
   /** The place whose panel is open: its counts are shown in the shop. */
   detail?: ZoneId | null;
+  fit: ShopFit;
 }
 
 const W = 1000;
@@ -172,6 +199,8 @@ function StoreImpl(props: Props) {
   const hints = props.jobHints ?? {};
   const problemZones = props.problemZones ?? {};
   const detail = props.detail ?? null;
+  const fit = props.fit;
+  const zones = ZONES.filter((z) => !['produce', 'chilled', 'ambient'].includes(z.z) || fit.depts.includes(z.z as DeptId));
   const counts = new Map<AssignmentId, number>();
   const placed: { s: StaffMember; a: AssignmentId; x: number; y: number }[] = [];
   for (const s of staff) {
@@ -215,25 +244,25 @@ function StoreImpl(props: Props) {
       {/* Building shell */}
       <rect x="4" y="4" width={W - 8} height={H - 8} rx="14" fill="url(#tiles)" stroke="var(--wall)" strokeWidth="8" />
       <rect x="8" y="8" width={W - 16} height="142" fill="url(#boards)" />
-      <Walkways />
+      <Walkways aisles={fit.aisles} />
       <BackWalls />
 
-      <Stockroom backroom={view.backroom} detail={detail} />
+      <Stockroom backroom={view.backroom} detail={detail} depts={fit.depts} />
       <Dock dock={view.dock} lorry={view.lorry} detail={detail === 'dock'} />
       <Office clock={view.clock} />
       <BreakRoom />
 
-      <Produce view={view} detail={detail === 'produce'} />
-      <Chilled view={view} detail={detail === 'chilled'} />
-      <Groceries view={view} detail={detail === 'ambient'} />
-      <Checkouts open={openTills} queue={view.queue} detail={detail === 'tills'} />
+      <Produce view={view} detail={detail === 'produce'} rows={fit.produceRows} />
+      {fit.cabinets > 0 ? <Chilled view={view} detail={detail === 'chilled'} cabinets={fit.cabinets} frost={fit.frost} /> : <EmptyWall />}
+      <Groceries view={view} detail={detail === 'ambient'} aisles={fit.aisles} />
+      <Checkouts open={openTills} queue={view.queue} detail={detail === 'tills'} installed={fit.tills} />
       <Entrance dropped={view.dropped} />
 
       {/* Zones: select a department, or place the selected employee */}
-      {ZONES.map((zone) => {
+      {zones.map((zone) => {
         const a = ZONE_JOB[zone.z];
         const n = counts.get(a) ?? 0;
-        const lim = assignmentLimit(a);
+        const lim = a === 'tills' ? fit.tills : assignmentLimit(a);
         const full = n >= lim;
         const hint = selected ? hints[zone.z] : undefined;
         const label = selected
@@ -272,7 +301,7 @@ function StoreImpl(props: Props) {
 
       <Notices notices={view.notices} onOpen={interactive ? (z) => onContext(z) : undefined} />
       {!selected &&
-        ZONES.map((zone) =>
+        zones.map((zone) =>
           problemZones[zone.z] ? (
             <ProblemMark
               key={`pm-${zone.z}`}
@@ -289,7 +318,7 @@ function StoreImpl(props: Props) {
       <WalkOuts view={view} motion={motion} />
 
       {selected &&
-        ZONES.map((zone) => {
+        zones.map((zone) => {
           const hint = hints[zone.z];
           if (!hint) return null;
           return <HintPill key={zone.z} zone={zone} hint={hint} />;
@@ -320,7 +349,7 @@ export const Store = memo(StoreImpl);
 // Structure
 // ---------------------------------------------------------------------------
 
-function Walkways() {
+function Walkways({ aisles }: { aisles: number }) {
   const strips: [number, number, number, number][] = [
     [290, 236, 698, 34], // main aisle in front of chilled
     [282, 156, 32, 312], // cross aisle by fruit & veg, up to the stockroom door
@@ -335,7 +364,7 @@ function Walkways() {
       ))}
       <AisleSign x={300} y={252} text="1" />
       <AisleSign x={330} y={325} text="2" />
-      <AisleSign x={330} y={379} text="3" />
+      {aisles >= 3 && <AisleSign x={330} y={379} text="3" />}
     </g>
   );
 }
@@ -382,19 +411,19 @@ function RoomLabel({ x, y, children }: { x: number; y: number; children: ReactNo
   );
 }
 
-function Stockroom({ backroom, detail }: { backroom: Record<DeptId, number>; detail: ZoneId | null }) {
-  const bays: [DeptId, number, string][] = [
+function Stockroom({ backroom, detail, depts }: { backroom: Record<DeptId, number>; detail: ZoneId | null; depts: DeptId[] }) {
+  const bays = ([
     ['produce', 22, 'Fruit & veg'],
     ['chilled', 144, 'Cold room'],
     ['ambient', 266, 'Cupboard'],
-  ];
+  ] as [DeptId, number, string][]).filter(([d]) => depts.includes(d));
   return (
     <g aria-hidden="true">
       <RoomLabel x={20} y={26}>
         STOCKROOM
       </RoomLabel>
       {bays.map(([d, x, label]) => {
-        const cap = CONFIG.departments[d].backroomCapacity;
+        const cap = CONFIG.campaign.backroom[d];
         const n = Math.round(Math.min(1, backroom[d] / cap) * 12);
         return (
           <g key={d}>
@@ -529,10 +558,10 @@ function Sticker({ x, y }: { x: number; y: number }) {
   );
 }
 
-function Produce({ view, detail }: { view: StoreView; detail: boolean }) {
+function Produce({ view, detail, rows }: { view: StoreView; detail: boolean; rows: number }) {
   const f = view.shelf.produce / Math.max(1, view.shelfCap.produce);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 15);
-  const crates: [number, number, string][] = [
+  const all: [number, number, string][] = [
     [26, 186, '#c2452d'],
     [150, 186, '#e08a1e'],
     [26, 252, '#5d8f2f'],
@@ -540,6 +569,7 @@ function Produce({ view, detail }: { view: StoreView; detail: boolean }) {
     [26, 318, '#d8b25a'],
     [150, 318, '#8a3a6b'],
   ];
+  const crates = all.slice(0, rows * 2);
   return (
     <g aria-hidden="true">
       {crates.map(([x, y, colour], c) => (
@@ -558,13 +588,18 @@ function Produce({ view, detail }: { view: StoreView; detail: boolean }) {
   );
 }
 
-function Chilled({ view, detail }: { view: StoreView; detail: boolean }) {
-  const working = view.fridgeFault ? 2 : 4;
+/** Where the chilled cabinets go, before the department is bought. */
+function EmptyWall() {
+  return <rect x="306" y="180" width="678" height="52" rx="4" fill="none" stroke="var(--line-strong)" strokeDasharray="5 5" aria-hidden="true" />;
+}
+
+function Chilled({ view, detail, cabinets, frost }: { view: StoreView; detail: boolean; cabinets: number; frost: boolean }) {
+  const working = view.fridgeFault ? cabinets / 2 : cabinets;
   const f = view.shelf.chilled / Math.max(1, view.shelfCap.chilled);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 24);
   return (
     <g aria-hidden="true">
-      {Array.from({ length: 4 }, (_, c) => {
+      {Array.from({ length: cabinets }, (_, c) => {
         const x = 306 + c * 171;
         return (
           <g key={c}>
@@ -576,15 +611,20 @@ function Chilled({ view, detail }: { view: StoreView; detail: boolean }) {
                 <rect key={i} x={x + 8 + (i % 12) * 13} y={191 + Math.floor(i / 12) * 21} width="9" height="15" rx="2" className={`pack pack-${(i + c) % 3}`} />
               ))}
             <rect x={x} y="226" width="165" height="6" rx="2" fill="rgba(255,255,255,0.6)" />
+            {frost && (
+              <text x={x + 155} y="198" textAnchor="middle" fontSize="11" fill="#4a7f95">
+                ❄
+              </text>
+            )}
           </g>
         );
       })}
       {view.markdown.includes('chilled') && <Sticker x={466} y={194} />}
       {view.fridgeFault && (
         <g>
-          <rect x="648" y="180" width="336" height="52" fill="url(#hatch)" />
-          <rect x="756" y="196" width="120" height="20" rx="6" fill="var(--paper)" opacity="0.92" />
-          <text x="816" y="210" textAnchor="middle" fontSize="11" fill="var(--bad)" fontWeight="800">
+          <rect x={306 + working * 171} y="180" width={working * 171 - 6} height="52" fill="url(#hatch)" />
+          <rect x={306 + working * 171 + (working * 171 - 6) / 2 - 60} y="196" width="120" height="20" rx="6" fill="var(--paper)" opacity="0.92" />
+          <text x={306 + working * 171 + (working * 171 - 6) / 2} y="210" textAnchor="middle" fontSize="11" fill="var(--bad)" fontWeight="800">
             Out of use
           </text>
         </g>
@@ -594,10 +634,10 @@ function Chilled({ view, detail }: { view: StoreView; detail: boolean }) {
   );
 }
 
-function Groceries({ view, detail }: { view: StoreView; detail: boolean }) {
+function Groceries({ view, detail, aisles }: { view: StoreView; detail: boolean; aisles: number }) {
   const f = view.shelf.ambient / Math.max(1, view.shelfCap.ambient);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 34);
-  const gondolas = [286, 340, 394];
+  const gondolas = [286, 340, 394].slice(0, aisles);
   const promo = view.promo.includes('ambient');
   return (
     <g aria-hidden="true">
@@ -620,10 +660,10 @@ function Groceries({ view, detail }: { view: StoreView; detail: boolean }) {
   );
 }
 
-function Checkouts({ open, queue, detail }: { open: number; queue: number; detail: boolean }) {
+function Checkouts({ open, queue, detail, installed }: { open: number; queue: number; detail: boolean; installed: number }) {
   return (
     <g aria-hidden="true">
-      {LANE_Y.map((y, i) => {
+      {LANE_Y.slice(0, installed).map((y, i) => {
         const on = i < open;
         return (
           <g key={i} opacity={on ? 1 : 0.55}>
@@ -649,7 +689,7 @@ function Checkouts({ open, queue, detail }: { open: number; queue: number; detai
           <rect x="828" y="438" width="120" height="22" rx="7" fill="var(--paper)" stroke={queue >= 8 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="1.5" />
           <text x="888" y="453.5" textAnchor="middle" fontSize="11.5" fontWeight="800" fill={queue >= 8 ? 'var(--bad)' : 'var(--ink)'}>
             Queue {Math.round(queue)}
-            {detail ? ` · ${open}/3 open` : ''}
+            {detail ? ` · ${open}/${installed} open` : ''}
           </text>
         </g>
       )}

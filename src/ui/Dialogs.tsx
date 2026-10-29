@@ -2,7 +2,6 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { CONFIG } from '../sim/config';
 import { money } from '../sim/engine';
 import type { Settings } from '../sim/save';
-import { CURATED_SEED } from '../sim/scenario';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -114,41 +113,23 @@ export function SettingsDialog({ settings, onChange, onClose }: { settings: Sett
   );
 }
 
-export function Menu({
-  seed,
-  onClose,
-  onRetry,
-  onNew,
-  onCurated,
-  onLearn,
-}: {
-  seed: number;
-  onClose: () => void;
-  onLearn: () => void;
-  onRetry: () => void;
-  onNew: () => void;
-  onCurated: () => void;
-}) {
+export interface MenuItem {
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+}
+
+/** The game menu: what you can start or restart from here. Starting again never happens without choosing it. */
+export function Menu({ title, note, items, onClose }: { title: string; note?: string; items: MenuItem[]; onClose: () => void }) {
   return (
-    <Modal title="Saturday" onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <div className="menu">
-        <p className="tiny muted">
-          Current Saturday: {seed === CURATED_SEED ? 'the first (curated) Saturday' : `seed ${seed}`}. Starting again discards this attempt.
-        </p>
-        <button type="button" className="btn-primary" onClick={onRetry}>
-          Retry same Saturday
-        </button>
-        <button type="button" className="btn-ghost" onClick={onLearn}>
-          Learn to play (guided shift)
-        </button>
-        <button type="button" className="btn-ghost" onClick={onNew}>
-          New Saturday (different demand and events)
-        </button>
-        {seed !== CURATED_SEED && (
-          <button type="button" className="btn-ghost" onClick={onCurated}>
-            Play the first Saturday again
+        {note && <p className="tiny muted">{note}</p>}
+        {items.map((it) => (
+          <button key={it.label} type="button" className={it.primary ? 'btn-primary' : 'btn-ghost'} onClick={it.onClick}>
+            {it.label}
           </button>
-        )}
+        ))}
       </div>
     </Modal>
   );

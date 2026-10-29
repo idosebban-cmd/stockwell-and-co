@@ -69,7 +69,7 @@ export const sensible: Strategy = (state) => {
   for (const d of DEPTS) {
     if (!hasDept(state, d)) continue;
     const u = deptUnits(state, d);
-    const demand = expected * CONFIG.departments[d].basket * 1.1;
+    const demand = expected * CONFIG.departments[d].basket * state.ctx.range[d] * 1.1;
     need[d] = Math.max(0, Math.min(u.backroom + Math.min(u.dock, CONFIG.staff.receiveRate * 0.5), demand + state.ctx.shelfCap[d] * 0.6 - u.shelf));
   }
   const count: Record<DeptId, number> = { produce: 0, chilled: 0, ambient: 0 };

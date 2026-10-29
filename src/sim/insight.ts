@@ -11,6 +11,7 @@ import { CONFIG, DEPTS, PRICE_TIERS, deptName, hourLabel, type DeptId, type Pric
 import {
   actionKey,
   assignmentLimit,
+  backroomCapacity,
   baseJobRate,
   deptUnits,
   jobRate,
@@ -71,7 +72,7 @@ export interface JobPreview {
 export function jobPreview(state: SimState, plan: HourPlan, staffId: string, job: AssignmentId): JobPreview {
   const s = state.staff.find((x) => x.id === staffId)!;
   const others = Object.entries(plan.assignments).filter(([id, a]) => a === job && id !== staffId).length;
-  const full = others >= assignmentLimit(job);
+  const full = others >= assignmentLimit(job, state);
   const rate = baseJobRate(job) * jobRate(s, job);
   let y = '';
   let blocked: string | null = null;
@@ -84,9 +85,10 @@ export function jobPreview(state: SimState, plan: HourPlan, staffId: string, job
     y = `~${Math.round(rate)} items/h`;
     const dock = DEPTS.filter((d) => deptUnits(state, d).dock > 0);
     if (!dock.length) blocked = 'Nothing on the dock to unload';
-    else if (dock.every((d) => deptUnits(state, d).backroom >= C.departments[d].backroomCapacity - 1)) blocked = 'Stockroom full: fill shelves first';
+    else if (dock.every((d) => deptUnits(state, d).backroom >= backroomCapacity(state, d) - 1)) blocked = 'Stockroom full: fill shelves first';
   } else {
     const d = job.split(':')[1] as DeptId;
+    if (!state.ctx.depts.includes(d)) return { job, yield: '', blocked: `The shop doesn’t have ${deptName(d).toLowerCase()} yet`, full: true };
     const u = deptUnits(state, d);
     y = `~${Math.round(rate)} items/h`;
     const overCap = d === 'chilled' && state.fridge.status === 'fault' && u.shelf > shelfCapacity(state, d);
@@ -137,7 +139,7 @@ export function outlook(state: SimState, plan: HourPlan, steps = remainingSteps(
     status: r.customersAbandoned >= 1 ? 'short' : cap < demand ? 'tight' : 'ok',
     text: `Customers ~${Math.round(demand)} · can serve ~${Math.round(cap)}`,
   });
-  for (const d of DEPTS) {
+  for (const d of state.ctx.depts) {
     const x = r.dept[d];
     const short = x.lostShelfGap + x.lostNoStock;
     rows.push({
@@ -300,7 +302,7 @@ export function fridgeFacts(state: SimState, plan: HourPlan) {
   const u = deptUnits(state, 'chilled');
   const cap = shelfCapacity(state, 'chilled');
   const atRisk = Math.max(0, u.shelf - cap);
-  const space = Math.max(0, C.departments.chilled.backroomCapacity - u.backroom);
+  const space = Math.max(0, backroomCapacity(state, 'chilled') - u.backroom);
   const movers = onShift(state).filter((s) => plan.assignments[s.id] === 'replenish:chilled');
   const moveRate = movers.reduce((t, s) => t + C.departments.chilled.replenishRate * jobRate(s, 'replenish:chilled'), 0);
   const booked = state.fridge.repairAtStep !== null || plan.actions.some((a) => a.kind === 'repair');
@@ -311,7 +313,7 @@ export function fridgeFacts(state: SimState, plan: HourPlan) {
     atRiskValue: atRisk * C.departments.chilled.unitCost,
     spoilPerHour: Math.round(C.events.fridgeFault.spoilPerHour * 100),
     capacity: cap,
-    fullCapacity: C.departments.chilled.shelfCapacity,
+    fullCapacity: state.ctx.shelfCap.chilled,
     coldRoomSpace: space,
     movers: movers.map((s) => s.name),
     moveRate,

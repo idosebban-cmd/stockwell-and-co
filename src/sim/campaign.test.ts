@@ -205,7 +205,7 @@ describe('recommended orders', () => {
       const have = carriedQty(c);
       const check = checkSetup(o, startCampaignDay(c, o).scenario.forecast, { cash: orderFunds(c), carried: have, ctx });
       expect(check.errors).toEqual([]);
-      for (const d of ctx.depts) expect(o.orders[d].morning).toBeLessThanOrEqual(ctx.shelfCap[d] + ctx.backroomCap[d] - have[d] + 1e-9);
+      for (const d of ctx.depts) expect(o.orders[d].morning).toBeLessThanOrEqual(Math.max(0, ctx.shelfCap[d] + ctx.backroomCap[d] - have[d]) + 1e-9);
       if (ctx.middayHour === null) for (const d of DEPTS) expect(o.orders[d].midday).toBe(0);
       ({ camp: c } = playDay(c));
     }

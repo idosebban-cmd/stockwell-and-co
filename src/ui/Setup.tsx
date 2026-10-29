@@ -3,19 +3,16 @@ import { CONFIG, DEPTS, PRICE_TIERS, deptName, hourLabel, type ChilledLife, type
 import { carriedQty, checkSetup, deliveryUnitCost, money, recommendedSetup, tierDemand } from '../sim/engine';
 import { makeScenario } from '../sim/scenario';
 import type { SetupPlan } from '../sim/types';
-import { Opening } from './Opening';
 
 interface Props {
   seed: number;
   onConfirm: (s: SetupPlan) => void;
-  onLearn: () => void;
-  returning: boolean;
+  onBack: () => void;
 }
 
-export function Setup({ seed, onConfirm, onLearn, returning }: Props) {
-  const [mode, setMode] = useState<'opening' | 'custom'>('opening');
-  if (mode === 'custom') return <CustomSetup seed={seed} onConfirm={onConfirm} onBack={() => setMode('opening')} />;
-  return <Opening seed={seed} returning={returning} onLearn={onLearn} onStart={() => onConfirm(recommendedSetup())} onCustom={() => setMode('custom')} />;
+/** Quick play's custom opening order. */
+export function Setup({ seed, onConfirm, onBack }: Props) {
+  return <CustomSetup seed={seed} onConfirm={onConfirm} onBack={onBack} />;
 }
 
 const LIFE_TAG: Record<ChilledLife, string> = { short: 'Expires tonight', long: 'Keeps till Wednesday' };

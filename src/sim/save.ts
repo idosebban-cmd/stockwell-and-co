@@ -4,6 +4,7 @@
  */
 import { DEPTS, PRICE_TIERS } from './config';
 import { rebuild, RECORD_VERSION, type GameRecord } from './game';
+import { CAMPAIGN_DAYS, CAMPAIGN_VERSION, rebuildCampaign, type CampaignRecord } from './campaign';
 import { ASSIGNMENTS, type HourPlan, type SetupPlan } from './types';
 
 export interface StorageLike {
@@ -14,6 +15,9 @@ export interface StorageLike {
 
 export const SAVE_KEY = 'stockwell-and-co:save';
 export const SETTINGS_KEY = 'stockwell-and-co:settings';
+export const CAMPAIGN_KEY = 'stockwell-and-co:campaign';
+/** Which mode was open last: the week, Quick play or the home screen. */
+export const MODE_KEY = 'stockwell-and-co:mode';
 
 export interface SaveFile {
   record: GameRecord;
@@ -140,4 +144,83 @@ function isPlan(p: unknown): p is HourPlan {
   if (!x || typeof x !== 'object' || !x.assignments || !Array.isArray(x.actions)) return false;
   if (!DEPTS.every((d) => PRICE_TIERS.includes(x.pricing?.[d]))) return false;
   return Object.values(x.assignments).every((a) => ASSIGNMENTS.includes(a));
+}
+
+// ---------------------------------------------------------------------------
+// The week (campaign), saved separately from Quick play
+// ---------------------------------------------------------------------------
+
+export interface CampaignSaveFile {
+  record: CampaignRecord;
+  /** The hour being planned. */
+  draft: HourPlan | null;
+  savedAt: string;
+}
+
+export interface CampaignLoad {
+  file: CampaignSaveFile | null;
+  /** Set when a saved week exists but can't be continued, to tell the player why it was reset. */
+  problem: string | null;
+}
+
+export function saveCampaign(storage: StorageLike | null, file: Omit<CampaignSaveFile, 'savedAt'>): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(CAMPAIGN_KEY, JSON.stringify({ ...file, savedAt: new Date().toISOString() }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearCampaign(storage: StorageLike | null): void {
+  try {
+    storage?.removeItem(CAMPAIGN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadCampaign(storage: StorageLike | null): CampaignLoad {
+  if (!storage) return { file: null, problem: null };
+  let raw: string | null;
+  try {
+    raw = storage.getItem(CAMPAIGN_KEY);
+  } catch {
+    return { file: null, problem: null };
+  }
+  if (!raw) return { file: null, problem: null };
+  const reset = 'Your saved week was made with an earlier version of the game and can’t be continued with the current rules, so a new week starts. Quick play saves are not affected.';
+  try {
+    const data = JSON.parse(raw) as CampaignSaveFile;
+    const r = data?.record;
+    if (!r || r.version !== CAMPAIGN_VERSION || typeof r.seed !== 'number' || !Array.isArray(r.days) || r.days.length > CAMPAIGN_DAYS) return { file: null, problem: reset };
+    for (const d of r.days) {
+      if ((d.setup !== null && !isSetup(d.setup)) || !Array.isArray(d.plans) || !d.plans.every(isPlan) || !Array.isArray(d.purchases) || typeof d.done !== 'boolean') return { file: null, problem: reset };
+    }
+    rebuildCampaign(r);
+    const draft = data.draft && isPlan(data.draft) ? data.draft : null;
+    return { file: { record: r, draft, savedAt: String(data.savedAt ?? '') }, problem: null };
+  } catch {
+    return { file: null, problem: reset };
+  }
+}
+
+export type Mode = 'home' | 'campaign' | 'quick';
+
+export function loadMode(storage: StorageLike | null): Mode {
+  try {
+    const m = storage?.getItem(MODE_KEY);
+    return m === 'campaign' || m === 'quick' ? m : 'home';
+  } catch {
+    return 'home';
+  }
+}
+
+export function saveMode(storage: StorageLike | null, m: Mode): void {
+  try {
+    storage?.setItem(MODE_KEY, m);
+  } catch {
+    /* ignore */
+  }
 }

@@ -19,7 +19,7 @@ export function Forecast({ scenario, currentHour, knownUpTo, reports = [], compa
   const max = Math.max(...expected, ...reports.map((r) => r.customersArrived)) * 1.1;
   const w = strip ? 640 : compact ? 300 : 420;
   const h = strip ? 78 : compact ? 92 : 130;
-  const bw = w / CONFIG.hours;
+  const bw = w / scenario.forecast.length;
   const ch = h - 30;
   return (
     <figure className={`forecast ${strip ? 'forecast-strip' : ''}`}>

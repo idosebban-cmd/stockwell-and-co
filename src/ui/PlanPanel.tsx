@@ -3,6 +3,7 @@ import { CONFIG, DEPTS, deptName, hourLabel, hourRange, type DeptId, type PriceT
 import {
   actionKey,
   assignmentLimit,
+  backroomCapacity,
   describeAction,
   deptUnits,
   expectedCustomers,
@@ -230,7 +231,7 @@ export function StaffCard({ state, plan, onChange, id, onClose, jobs }: { state:
       </dl>
       <p className="picker-title">Move to</p>
       <ul className="job-options">
-        {(jobs ?? ASSIGNMENTS).map((j) => {
+        {(jobs ?? ASSIGNMENTS.filter((x) => assignmentLimit(x, state) > 0)).map((j) => {
           const pv = jobPreview(state, plan, s.id, j);
           const n = Object.values(plan.assignments).filter((x) => x === j).length;
           const here = j === a;
@@ -248,7 +249,7 @@ export function StaffCard({ state, plan, onChange, id, onClose, jobs }: { state:
                 }}
               >
                 <span className="jo-name">{ASSIGNMENT_LABEL[j]}</span>
-                <span className={`jo-yield ${off ? 'bad' : ''}`}>{here ? 'Current job' : pv.full ? `Full (${n}/${assignmentLimit(j)})` : (pv.blocked ?? pv.yield)}</span>
+                <span className={`jo-yield ${off ? 'bad' : ''}`}>{here ? 'Current job' : pv.full ? `Full (${n}/${assignmentLimit(j, state)})` : (pv.blocked ?? pv.yield)}</span>
               </button>
             </li>
           );
@@ -435,6 +436,7 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
     if (CONFIG.departments[d].perishable) actions.push({ kind: 'markdown', dept: d });
     actions.push({ kind: 'promotion', dept: d }, { kind: 'emergency', dept: d });
   }
+  const allowed = actions.filter((a) => state.ctx.actions.includes(a.kind));
   return (
     <>
       {problem && (
@@ -487,13 +489,13 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
         <dd>{fillers.length ? fillers.map((s) => s.name).join(', ') : 'nobody'}</dd>
       </dl>
       {!pricesOpen && <StaffPicker state={state} plan={plan} onChange={onChange} job={job} title={fillers.length ? 'Add another filler' : 'Put someone on these shelves'} compact={!problem} />}
-      {(opts.pricing === 'all' || opts.pricing === d) && (
+      {(opts.pricing === 'all' || opts.pricing === d) && state.ctx.pricing && (
         <PriceSection state={state} plan={plan} onChange={onChange} d={d} steps={opts.steps} fixed={opts.pricing === d} open={pricesOpen} setOpen={setPricesOpen} />
       )}
-      {actions.length > 0 && (
+      {allowed.length > 0 && (
         <details className="more-actions">
           <summary>More actions</summary>
-          <ActionList state={state} plan={plan} onChange={onChange} actions={actions} label={actionShortLabel} />
+          <ActionList state={state} plan={plan} onChange={onChange} actions={allowed} label={actionShortLabel} />
         </details>
       )}
     </>
@@ -523,7 +525,7 @@ function TillCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
         <dd>after a ~{CONFIG.checkout.patienceMinutes}-minute wait</dd>
       </dl>
       <StaffPicker state={state} plan={plan} onChange={onChange} job="tills" title="Open another till" compact={!row || row.status === 'ok'} />
-      {opts.allowActions && <ActionList state={state} plan={plan} onChange={onChange} actions={[{ kind: 'temp' }]} label={() => 'Book an agency temp'} />}
+      {opts.allowActions && state.ctx.actions.includes('temp') && <ActionList state={state} plan={plan} onChange={onChange} actions={[{ kind: 'temp' }]} label={() => 'Book an agency temp'} />}
     </>
   );
 }
@@ -552,7 +554,7 @@ function DockCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
             <div key={d} className="contents">
               <dt>{deptName(d)}</dt>
               <dd>
-                {Math.round(u.dock)} waiting · space {Math.round(Math.max(0, CONFIG.departments[d].backroomCapacity - u.backroom))}
+                {Math.round(u.dock)} waiting · space {Math.round(Math.max(0, backroomCapacity(state, d) - u.backroom))}
                 {d === 'chilled' ? ' · spoils here' : ''}
               </dd>
             </div>
@@ -568,10 +570,10 @@ function DockCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
         ))}
       </dl>
       <StaffPicker state={state} plan={plan} onChange={onChange} job="receive" title={unloaders.length ? 'Add another unloader' : 'Put someone on Unload delivery'} compact={waiting < 1} />
-      {opts.allowActions && (
+      {opts.allowActions && state.ctx.actions.includes('emergency') && (
         <details className="more-actions">
           <summary>Emergency orders</summary>
-          <ActionList state={state} plan={plan} onChange={onChange} actions={DEPTS.map((d) => ({ kind: 'emergency', dept: d }) as ActionRequest)} label={(a) => ('dept' in a ? deptName(a.dept) : '')} />
+          <ActionList state={state} plan={plan} onChange={onChange} actions={state.ctx.depts.map((d) => ({ kind: 'emergency', dept: d }) as ActionRequest)} label={(a) => ('dept' in a ? deptName(a.dept) : '')} />
         </details>
       )}
     </>
@@ -619,7 +621,7 @@ function BreakCard({ state, plan, onChange }: { state: SimState; plan: HourPlan;
 function StaffPicker({ state, plan, onChange, job, title, compact }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; job: AssignmentId; title: string; compact?: boolean }) {
   const [open, setOpen] = useState(!compact);
   const inJob = Object.values(plan.assignments).filter((a) => a === job).length;
-  const full = inJob >= assignmentLimit(job);
+  const full = inJob >= assignmentLimit(job, state);
   const candidates = onShift(state).filter((s) => plan.assignments[s.id] !== job);
   if (!open)
     return (
@@ -630,7 +632,7 @@ function StaffPicker({ state, plan, onChange, job, title, compact }: { state: Si
   return (
     <div className="picker">
       <p className="picker-title">
-        {title} <span className="tiny muted">({inJob}/{assignmentLimit(job)})</span>
+        {title} <span className="tiny muted">({inJob}/{assignmentLimit(job, state)})</span>
       </p>
       {full ? (
         <p className="tiny">Full. Move someone out first.</p>
@@ -702,7 +704,7 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
   const tradeOff = priceTradeOff(state, opts, tier, d);
   const mods = priceModifiers(state, plan, d);
   const warn =
-    sel.shortDatedLeft > 20 && CONFIG.hours - state.hour <= 3
+    sel.shortDatedLeft > 20 && state.ctx.hours - state.hour <= 3
       ? `~${Math.round(sel.shortDatedLeft)} short-dated left after this ${intervalLabel(steps)}`
       : sel.walkouts >= 2
         ? `~${Math.round(sel.walkouts)} may give up queueing`
@@ -927,8 +929,8 @@ export function StaffList({ state, plan, onChange, onSelect }: { state: SimState
                 Job for {s.name}
               </label>
               <select id={id} value={a ?? ''} onChange={(e) => onChange({ ...plan, assignments: { ...plan.assignments, [s.id]: e.target.value as AssignmentId } })}>
-                {ASSIGNMENTS.map((opt) => {
-                  const full = (counts.get(opt) ?? 0) >= assignmentLimit(opt) && opt !== a;
+                {ASSIGNMENTS.filter((opt) => assignmentLimit(opt, state) > 0).map((opt) => {
+                  const full = (counts.get(opt) ?? 0) >= assignmentLimit(opt, state) && opt !== a;
                   return (
                     <option key={opt} value={opt} disabled={full}>
                       {ASSIGNMENT_LABEL[opt]}

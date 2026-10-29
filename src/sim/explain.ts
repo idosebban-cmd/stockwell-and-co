@@ -101,7 +101,7 @@ export function previewWarnings(state: SimState, plan: HourPlan): Note[] {
       text: `${listNames(stretched.map((s) => s.name))} ${stretched.length > 1 ? 'have' : 'has'} gone ${CONFIG.wellbeing.hoursBeforeBreakNeeded} hours without a break; working on will hurt wellbeing.`,
     });
   const noBreak = onShift(state).filter((s) => !s.isTemp && s.breaks === 0 && plan.assignments[s.id] !== 'break');
-  const hoursLeft = CONFIG.hours - h;
+  const hoursLeft = state.ctx.hours - h;
   if (h >= 3 && noBreak.length > 0 && noBreak.length >= hoursLeft * CONFIG.staff.limits.break - 2)
     notes.push({ kind: 'staff', level: 'warn', text: `${noBreak.length} people still need a break and the break room only fits ${CONFIG.staff.limits.break}. Time is running out.` });
 
@@ -121,11 +121,11 @@ export function previewWarnings(state: SimState, plan: HourPlan): Note[] {
   if (h >= 4) {
     const shortDated = total(
       [...state.stock.chilled.shelf, ...state.stock.chilled.backroom, ...state.stock.chilled.dock].filter(
-        (b) => b.expiresAt !== null && b.expiresAt <= CONFIG.hours,
+        (b) => b.expiresAt !== null && b.expiresAt <= state.ctx.hours,
       ),
     );
     let demand = 0;
-    for (let k = h; k < CONFIG.hours; k++) demand += expectedCustomers(state, k) * CONFIG.departments.chilled.basket;
+    for (let k = h; k < state.ctx.hours; k++) demand += expectedCustomers(state, k) * CONFIG.departments.chilled.basket * state.ctx.range.chilled;
     if (shortDated > demand * 0.85)
       notes.push({
         kind: 'waste',
