@@ -1,3 +1,4 @@
+/** Per-seed results for the sensible strategy, with the three biggest factors. */
 import { playShift, sensible } from '../src/sim/bots';
 import { operatingProfit, satisfactionSoFar, wellbeing } from '../src/sim/engine';
 import { summarise } from '../src/sim/summary';

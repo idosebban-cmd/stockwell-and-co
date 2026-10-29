@@ -1,3 +1,4 @@
+/** Balance report: plays complete Saturdays with scripted strategies across seeds. Run with `npm run balance`. */
 import { playShift, sensible, noBreaks, oneTill, noReplenishment, passive } from '../src/sim/bots';
 import { operatingProfit, satisfactionSoFar, wellbeing, inventoryValue } from '../src/sim/engine';
 import { CURATED_SEED } from '../src/sim/scenario';
@@ -17,8 +18,3 @@ for (const [name, strat] of Object.entries(strategies)) {
   console.log(`\n== ${name}\n` + rows.join('\n'));
 }
 
-const { reports } = playShift(CURATED_SEED, sensible);
-const waste: Record<string, number> = {};
-for (const r of reports) for (const w of r.waste) waste[`${w.dept}:${w.reason}`] = (waste[`${w.dept}:${w.reason}`] ?? 0) + w.cost;
-console.log('\ncurated sensible waste', waste);
-for (const r of reports) console.log(r.hour, 'cust', r.customersArrived.toFixed(0), 'served', r.customersServed.toFixed(0), 'ab', r.customersAbandoned.toFixed(1), 'wait', r.avgWait.toFixed(1), 'sat', r.satisfaction.score.toFixed(0), Object.entries(r.dept).map(([d, x]) => `${d}:gap${x.lostShelfGap.toFixed(0)}/no${x.lostNoStock.toFixed(0)} sh${x.shelfEnd.toFixed(0)} br${x.backroomEnd.toFixed(0)} dk${x.dockEnd.toFixed(0)}`).join(' '), r.staff.map(s=>s.name[0]+':'+s.assignment.replace('replenish:','')).join(','));

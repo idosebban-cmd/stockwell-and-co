@@ -454,7 +454,7 @@ export function planErrors(state: SimState, plan: HourPlan): string[] {
   }
   for (const [a, n] of counts) {
     const lim = assignmentLimit(a);
-    if (n > lim) errors.push(`${labelFor(a)} has room for ${lim}, not ${n}.`);
+    if (n > lim) errors.push(`${labelFor(a)} ${a === 'tills' ? 'have' : 'has'} room for ${lim}, not ${n}.`);
   }
   const planned: ActionRequest[] = [];
   for (const a of plan.actions) {

@@ -143,7 +143,7 @@ describe('assignment limits', () => {
     const state = startDay(SEED, recommendedSetup());
     const plan = defaultPlan(state);
     for (const id of ['priya', 'bev', 'kwame', 'dougie']) plan.assignments[id] = 'tills';
-    expect(planErrors(state, plan).join(' ')).toMatch(/tills has room for 3/);
+    expect(planErrors(state, plan).join(' ')).toMatch(/tills have room for 3/);
     expect(() => runHour(state, plan)).toThrow();
     const breaks = defaultPlan(state);
     for (const id of ['priya', 'bev', 'kwame']) breaks.assignments[id] = 'break';
