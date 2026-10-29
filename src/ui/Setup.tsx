@@ -87,8 +87,15 @@ export function Setup({ seed, onConfirm }: Props) {
               <legend>{deptName(d)}</legend>
               <p className="tiny muted">{DEPT_NOTES[d]}</p>
               <div className="order-grid">
-                <QtyInput label="Morning delivery" value={o.morning} onChange={(v) => setQty(d, 'morning', v)} max={pd.space} />
-                <QtyInput label="Midday delivery (12:00)" value={o.midday} onChange={(v) => setQty(d, 'midday', v)} max={CONFIG.openingOrder.maxMidday} />
+                <QtyInput id={`${d}-morning`} label="Morning delivery" dept={deptName(d)} value={o.morning} onChange={(v) => setQty(d, 'morning', v)} max={pd.space} />
+                <QtyInput
+                  id={`${d}-midday`}
+                  label="Midday delivery (12:00)"
+                  dept={deptName(d)}
+                  value={o.midday}
+                  onChange={(v) => setQty(d, 'midday', v)}
+                  max={CONFIG.openingOrder.maxMidday}
+                />
                 <div className="order-cost">
                   <span className="tiny muted">Cost at {money(cfg.unitCost)} each</span>
                   <strong>{money(pd.cost)}</strong>
@@ -103,7 +110,9 @@ export function Setup({ seed, onConfirm }: Props) {
                   {!pd.morningFits && <strong className="bad"> · too much</strong>}
                 </span>
                 {pd.middayOverflow > 0 && (
-                  <span className="tiny note-warn">Midday delivery is bigger than the stockroom; the extra waits on the dock until there is room.</span>
+                  <span className="tiny note-info">
+                    The midday delivery is more than the stockroom holds ({cfg.backroomCapacity}); the extra waits on the dock until shelves make room.
+                  </span>
                 )}
               </div>
               <div className="tiny muted">
@@ -156,20 +165,37 @@ export function Setup({ seed, onConfirm }: Props) {
   );
 }
 
-function QtyInput({ label, value, onChange, max }: { label: string; value: number; onChange: (v: number) => void; max: number }) {
+function QtyInput({
+  id,
+  label,
+  dept,
+  value,
+  onChange,
+  max,
+}: {
+  id: string;
+  label: string;
+  dept: string;
+  value: number;
+  onChange: (v: number) => void;
+  max: number;
+}) {
   const step = 20;
   return (
-    <label className="qty">
-      <span className="tiny">{label}</span>
+    <div className="qty">
+      <label className="tiny" htmlFor={id}>
+        {label}
+        <span className="sr-only"> of {dept}</span>
+      </label>
       <span className="qty-row">
-        <button type="button" className="btn-small" aria-label={`Less: ${label}`} onClick={() => onChange(Math.max(0, value - step))}>
+        <button type="button" className="btn-small" aria-label={`20 fewer: ${dept} ${label.toLowerCase()}`} onClick={() => onChange(Math.max(0, value - step))}>
           −
         </button>
-        <input type="number" inputMode="numeric" min={0} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value) || 0)} />
-        <button type="button" className="btn-small" aria-label={`More: ${label}`} onClick={() => onChange(value + step)}>
+        <input id={id} type="number" inputMode="numeric" min={0} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value) || 0)} />
+        <button type="button" className="btn-small" aria-label={`20 more: ${dept} ${label.toLowerCase()}`} onClick={() => onChange(value + step)}>
           +
         </button>
       </span>
-    </label>
+    </div>
   );
 }
