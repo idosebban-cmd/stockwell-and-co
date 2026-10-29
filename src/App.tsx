@@ -5,7 +5,8 @@ import { ASSIGNMENT_LABEL } from './sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from './sim/types';
 import { useGame, type Game } from './ui/useGame';
 import { StatusBar } from './ui/StatusBar';
-import { Store, storeViewFromState, type Activity, type StoreView, type ZoneId } from './ui/Store';
+import { STORE_SIZE, Store, staffPositions, storeViewFromState, type Activity, type StoreView, type ZoneId } from './ui/Store';
+import { activeTip, shopNotices, tipText, TIP_ORDER, type TipId } from './ui/Coach';
 import { PlanPanel } from './ui/PlanPanel';
 import { ReplayPanel, ResultsPanel } from './ui/ResultsPanel';
 import { Setup } from './ui/Setup';
@@ -97,6 +98,20 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
   }, [phase, report, reduced, game.settings.replaySpeed, game.finishReplay]);
 
   const plan = game.draft;
+  const tipsDone = game.settings.tipsDone;
+  const markTip = (...ids: TipId[]) => {
+    const missing = ids.filter((t) => !tipsDone.includes(t));
+    if (missing.length) game.setSettings({ tipsDone: [...tipsDone, ...missing] });
+  };
+  const tip = phase === 'plan' ? activeTip(tipsDone, selected) : null;
+  const onPlanChange = (p: HourPlan) => {
+    if (plan && JSON.stringify(p.assignments) !== JSON.stringify(plan.assignments)) markTip('select', 'assign');
+    game.setDraft(p);
+  };
+  const run = () => {
+    markTip(...TIP_ORDER);
+    game.runNextHour();
+  };
   const onZone = useCallback(
     (a: AssignmentId) => {
       if (!selected || !plan) return;
@@ -106,9 +121,11 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
         return;
       }
       game.setDraft({ ...plan, assignments: { ...plan.assignments, [selected]: a } });
+      markTip('select', 'assign');
       setZoneMsg(null);
       setSelected(null);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, plan, game],
   );
 
@@ -121,19 +138,23 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
         setSelected(null);
         setZoneMsg(null);
       }
-      if ((e.key === 'r' || e.key === 'R') && phase === 'plan' && !e.metaKey && !e.ctrlKey) game.runNextHour();
+      if ((e.key === 'r' || e.key === 'R') && phase === 'plan' && !e.metaKey && !e.ctrlKey) run();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, game]);
+  });
 
   const built = useMemo(() => buildView(state, phase, report, step, plan), [state, phase, report, step, plan]);
   const selectedName = state.staff.find((s) => s.id === selected)?.name;
+  const positions = staffPositions(built.staff, built.assignments);
+  const anchorId = tip === 'assign' ? selected : (built.staff.find((s) => s.id === 'mags') ?? built.staff[0])?.id;
+  const anchor = anchorId ? positions[anchorId] : undefined;
 
   return (
     <main className="shop" id="main">
       <div className="store-col">
         <div className="store-wrap">
+          <div className="store-stage">
           <Store
             view={built.view}
             staff={built.staff}
@@ -142,6 +163,7 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
             selected={phase === 'plan' ? selected : null}
             onSelectStaff={(id) => {
               setZoneMsg(null);
+              markTip('select');
               setSelected((s) => (s === id ? null : id));
             }}
             onZone={onZone}
@@ -151,17 +173,22 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
             animating={phase === 'replay'}
             reducedMotion={reduced}
           />
-          <p className="store-hint" role="status">
-            {phase === 'plan' && selected ? (
-              <>
-                Moving <strong>{selectedName}</strong>: click where they should work, or press Escape. {zoneMsg && <strong className="bad">{zoneMsg}</strong>}
-              </>
-            ) : phase === 'plan' ? (
-              'Click a department for its stock, prices and actions. Click a person to move them.'
-            ) : phase === 'replay' ? (
-              'Replaying the recorded hour: shelf levels, queues and staff activity are the actual results.'
-            ) : null}
-          </p>
+          {(tip === 'select' || tip === 'assign') && anchor && (
+            <Callout
+              x={anchor[0]}
+              y={anchor[1] - 62}
+              text={tipText(tip, selectedName)}
+              onDismiss={() => markTip(tip)}
+              onSkipAll={() => markTip(...TIP_ORDER)}
+            />
+          )}
+          {zoneMsg && selected && anchor && <Callout x={anchor[0]} y={anchor[1] - 62} text={zoneMsg} warn onDismiss={() => setZoneMsg(null)} />}
+          {phase === 'plan' && selected && !tip && !zoneMsg && (
+            <p className="stage-chip" role="status">
+              Moving {selectedName} · click a place · Esc to cancel
+            </p>
+          )}
+          </div>
         </div>
         <div className="below-store">
           <Forecast scenario={state.scenario} currentHour={phase === 'plan' ? state.hour : (report?.hour ?? state.hour)} knownUpTo={state.hour} reports={state.history} strip />
@@ -173,12 +200,13 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
           <PlanPanel
             state={state}
             plan={plan}
-            onChange={game.setDraft}
+            onChange={onPlanChange}
+            runTip={tip === 'run' ? { text: tipText('run'), onDismiss: () => markTip('run') } : null}
             selected={selected}
             onSelect={setSelected}
             context={context}
             onContext={setContext}
-            onRun={game.runNextHour}
+            onRun={run}
           />
         )}
         {phase === 'replay' && report && <ReplayPanel report={report} step={step} onSkip={game.finishReplay} />}
@@ -192,6 +220,26 @@ function Shop({ game, state, reduced }: { game: Game; state: SimState; reduced: 
         )}
       </aside>
     </main>
+  );
+}
+
+function Callout({ x, y, text, warn, onDismiss, onSkipAll }: { x: number; y: number; text: string; warn?: boolean; onDismiss: () => void; onSkipAll?: () => void }) {
+  const below = y < 140;
+  const style = { left: `${(x / STORE_SIZE.w) * 100}%`, top: `${((below ? y + 120 : y) / STORE_SIZE.h) * 100}%` };
+  return (
+    <div className={`callout ${below ? 'callout-below' : ''} ${warn ? 'callout-warn' : ''}`} style={style} role="status">
+      <p>{text}</p>
+      <div className="callout-actions">
+        {onSkipAll && (
+          <button type="button" className="btn-link" onClick={onSkipAll}>
+            Skip tips
+          </button>
+        )}
+        <button type="button" className="callout-x" onClick={onDismiss} aria-label="Dismiss">
+          ✕
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -261,6 +309,7 @@ function buildView(state: SimState, phase: Game['phase'], report: HourReport | n
         fridgeFault: s.fridgeFault,
         lorry: s.dock > 0 && step === 0,
         promo: promoNow(report.hour),
+        notices: [],
         markdown: markdownNow(report.hour),
         tick: `${report.hour}-${step}`,
         clock: `${hourLabel(report.hour).slice(0, 2)}:${mins === '60' ? '59' : mins}`,
@@ -287,6 +336,7 @@ function buildView(state: SimState, phase: Game['phase'], report: HourReport | n
     markdown:
       phase === 'plan' ? [...new Set([...markdownNow(state.hour), ...planned.flatMap((a) => (a.kind === 'markdown' ? [a.dept] : []))])] : markdownNow(state.hour),
     dropped: phase === 'results' && report ? report.customersAbandoned : 0,
+    notices: shopNotices(state, phase === 'plan' ? plan : null),
     clock: state.hour >= CONFIG.hours ? '17:00' : hourLabel(state.hour),
   });
   if (phase === 'results' && report) {

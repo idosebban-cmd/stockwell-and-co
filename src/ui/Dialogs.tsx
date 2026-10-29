@@ -98,6 +98,9 @@ export function SettingsDialog({ settings, onChange, onClose }: { settings: Sett
             <input type="radio" name="speed" checked={settings.replaySpeed === 'fast'} onChange={() => onChange({ replaySpeed: 'fast' })} /> Fast
           </label>
         </fieldset>
+        <button type="button" className="btn-secondary" onClick={() => onChange({ tipsDone: [] })} disabled={settings.tipsDone.length === 0}>
+          Show the first-shift tips again
+        </button>
         <p className="tiny muted">Replay settings never change results.</p>
       </div>
     </Modal>

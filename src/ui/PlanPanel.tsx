@@ -29,16 +29,8 @@ interface Props {
   context: ZoneId | null;
   onContext: (z: ZoneId | null) => void;
   onRun: () => void;
+  runTip?: { text: string; onDismiss: () => void } | null;
 }
-
-const TIPS: Record<number, string> = {
-  0: 'Click a department in the shop to see its stock, prices and actions. To move someone, click them (or their name below), then click where they should work. Each person has a modest speciality, shown on their card.',
-  1: 'The break room fits two. Quieter morning hours are the cheapest time for breaks; tired staff slow down later.',
-  2: 'The midday lorry reaches the dock at 12:00. Shelves can only be filled from the stockroom, so someone needs to receive it.',
-  3: 'Watch the till lanes. Once the wait passes about six minutes, shoppers start to give up and leave their baskets.',
-  4: "Friday's leftover produce has just gone past its best. Anything left of it was binned at 13:00.",
-  5: 'Short-dated chilled that hasn’t sold by 17:00 is binned. A markdown in the last couple of hours turns some of it into small sales.',
-};
 
 export function energyWord(e: number): string {
   if (e < CONFIG.staff.exhaustedBelow) return 'Exhausted';
@@ -47,7 +39,7 @@ export function energyWord(e: number): string {
   return 'Fresh';
 }
 
-export function PlanPanel({ state, plan, onChange, selected, onSelect, context, onContext, onRun }: Props) {
+export function PlanPanel({ state, plan, onChange, selected, onSelect, context, onContext, onRun, runTip }: Props) {
   const errors = planErrors(state, plan);
   const notes = useMemo(() => previewWarnings(state, plan), [state, plan]);
   const [tab, setTab] = useState<'staff' | 'commercial'>('staff');
@@ -55,11 +47,8 @@ export function PlanPanel({ state, plan, onChange, selected, onSelect, context, 
   return (
     <div className="panel-inner">
       <section className="hour-head">
-        <h2>Planning {hourRange(state.hour)}</h2>
-        <p className="muted">
-          About <strong>{Math.round(expectedCustomers(state))}</strong> customers expected this hour.
-          {state.hour < CONFIG.hours - 1 && <> Next hour: about {Math.round(expectedCustomers(state, state.hour + 1))}.</>}
-        </p>
+        <h2>{hourRange(state.hour)}</h2>
+        <p className="muted">~{Math.round(expectedCustomers(state))} customers expected</p>
         {state.announcements.length > 0 && (
           <div className="tannoy" role="status">
             <span className="tannoy-label">Tannoy</span>
@@ -69,11 +58,6 @@ export function PlanPanel({ state, plan, onChange, selected, onSelect, context, 
               ))}
             </ul>
           </div>
-        )}
-        {state.scenario.curated && TIPS[state.hour] && (
-          <p className="tip">
-            <strong>Tip:</strong> {TIPS[state.hour]}
-          </p>
         )}
       </section>
 
@@ -90,7 +74,7 @@ export function PlanPanel({ state, plan, onChange, selected, onSelect, context, 
           className={tab === 'commercial' ? 'tab tab-on' : 'tab'}
           onClick={() => setTab('commercial')}
         >
-          All prices &amp; actions{plan.actions.length ? ` (${plan.actions.length})` : ''}
+          Prices &amp; actions{plan.actions.length ? ` (${plan.actions.length})` : ''}
         </button>
       </div>
 
@@ -110,22 +94,33 @@ export function PlanPanel({ state, plan, onChange, selected, onSelect, context, 
             ))}
           </ul>
         )}
+        {runTip && (
+          <div className="callout callout-inline" role="status">
+            <p>{runTip.text}</p>
+            <button type="button" className="callout-x" onClick={runTip.onDismiss} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
         <button type="button" className="btn-primary btn-run" disabled={errors.length > 0} onClick={onRun}>
-          Run {hourRange(state.hour)} ▶
+          Run hour ▶
         </button>
-        <p className="tiny muted">Nothing is final until you run the hour. Press R to run.</p>
       </div>
     </div>
   );
 }
 
 function Notes({ notes }: { notes: Note[] }) {
+  const [all, setAll] = useState(false);
+  const sorted = [...notes].sort((a, b) => Number(b.level === 'warn') - Number(a.level === 'warn'));
+  const shown = all ? sorted : sorted.slice(0, 3);
   return (
     <section className="notes" aria-labelledby="notes-h">
-      <h3 id="notes-h">Shift manager’s notes</h3>
-      <p className="tiny muted">Likely issues for this hour, based on the forecast. Not guarantees.</p>
+      <h3 id="notes-h" title="Likely issues for this hour, based on the forecast. Not guarantees.">
+        Likely this hour
+      </h3>
       <ul>
-        {notes.map((n, i) => (
+        {shown.map((n, i) => (
           <li key={i} className={`note note-${n.level}`}>
             <span className="note-icon" aria-hidden="true">
               {n.level === 'warn' ? '!' : n.level === 'good' ? '✓' : 'i'}
@@ -135,6 +130,11 @@ function Notes({ notes }: { notes: Note[] }) {
           </li>
         ))}
       </ul>
+      {sorted.length > 3 && (
+        <button type="button" className="btn-link" onClick={() => setAll((x) => !x)}>
+          {all ? 'Show fewer' : `${sorted.length - 3} more`}
+        </button>
+      )}
     </section>
   );
 }
@@ -149,14 +149,13 @@ function ContextCard({
   onChange,
   zone,
   onClose,
-  selected,
 }: {
   state: SimState;
   plan: HourPlan;
   onChange: (p: HourPlan) => void;
   zone: ZoneId;
   onClose: () => void;
-  selected: string | null;
+  selected?: string | null;
 }) {
   const job = ZONE_JOB[zone];
   const people = onShift(state).filter((s) => plan.assignments[s.id] === job);
@@ -170,8 +169,7 @@ function ContextCard({
         </button>
       </div>
       <p className="tiny">
-        {ASSIGNMENT_LABEL[job]}: <strong>{names}</strong> ({people.length}/{assignmentLimit(job)})
-        {selected ? '' : '. Select someone, then click here in the shop, to add them.'}
+        Staff: <strong>{names}</strong> ({people.length}/{assignmentLimit(job)})
       </p>
       {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptDetails state={state} plan={plan} onChange={onChange} d={zone} />}
       {zone === 'tills' && <TillDetails state={state} plan={plan} onChange={onChange} />}
@@ -199,37 +197,38 @@ function DeptDetails({ state, plan, onChange, d }: { state: SimState; plan: Hour
         <dt>On the shelf</dt>
         <dd>
           {Math.round(u.shelf)} of {Math.round(cap)}
-          {d === 'chilled' && state.fridge.status === 'fault' ? ' (half the cabinets are broken)' : ''}
+          {d === 'chilled' && state.fridge.status === 'fault' ? ' · half out of use' : ''}
         </dd>
         <dt>Stockroom</dt>
         <dd>{Math.round(u.backroom)}</dd>
         {u.dock > 0 && (
           <>
             <dt>On the dock</dt>
-            <dd className="bad">{Math.round(u.dock)} waiting to be received</dd>
+            <dd className="bad">{Math.round(u.dock)} waiting</dd>
           </>
         )}
         {incoming.map((x) => (
           <div key={x.id} className="contents">
-            <dt>Due {hourLabel(x.arrivesAt)}</dt>
+            <dt>Delivery: {hourLabel(x.arrivesAt)}</dt>
             <dd>
-              {Math.round(x.qty)} ({x.kind === 'emergency' ? 'emergency order' : 'midday lorry'}
-              {x.life ? `, ${CONFIG.chilledLife[x.life].name.toLowerCase()}` : ''})
+              {Math.round(x.qty)}
+              {x.kind === 'emergency' ? ' (emergency)' : ''}
+              {x.life ? ` · ${x.life === 'short' ? 'expires tonight' : 'keeps'}` : ''}
             </dd>
           </div>
         ))}
         <dt>Wanted this hour</dt>
-        <dd>about {Math.round(wanted)} items</dd>
+        <dd>~{Math.round(wanted)}</dd>
         {d === 'chilled' && (
           <>
-            <dt>Short-dated</dt>
-            <dd>{Math.round(short)} must sell by 17:00 or be binned</dd>
+            <dt>Expires tonight</dt>
+            <dd>{Math.round(short)}</dd>
           </>
         )}
         {d === 'produce' && state.hour < 4 && friday > 0.5 && (
           <>
-            <dt>Friday’s produce</dt>
-            <dd>{Math.round(friday)} past its best at 13:00</dd>
+            <dt>Expires 13:00</dt>
+            <dd>{Math.round(friday)} (Friday’s)</dd>
           </>
         )}
       </dl>
@@ -250,15 +249,12 @@ function TillDetails({ state, plan, onChange }: { state: SimState; plan: HourPla
       <dl className="facts">
         <dt>Queue now</dt>
         <dd>{Math.round(state.queue.customers)}</dd>
-        <dt>Customers expected</dt>
-        <dd>about {Math.round(expectedCustomers(state))} this hour</dd>
+        <dt>Expected</dt>
+        <dd>~{Math.round(expectedCustomers(state))} customers</dd>
         <dt>Till capacity</dt>
-        <dd>about {Math.round(cap)} an hour with this staffing</dd>
+        <dd>~{Math.round(cap)} an hour</dd>
       </dl>
-      <p className="tiny muted">
-        One person serves about {CONFIG.checkout.customersPerHour} customers an hour when fresh. Past a {CONFIG.checkout.patienceMinutes}-minute wait, shoppers start to
-        give up and leave their baskets.
-      </p>
+      <p className="tiny muted">Walk-outs start after a {CONFIG.checkout.patienceMinutes}-minute wait.</p>
       <ActionList state={state} plan={plan} onChange={onChange} actions={[{ kind: 'temp' }]} label={() => 'Book an agency temp'} />
     </>
   );
@@ -289,10 +285,7 @@ function DockDetails({ state, plan, onChange }: { state: SimState; plan: HourPla
           </div>
         ))}
       </dl>
-      <p className="tiny muted">
-        One person receives about {CONFIG.staff.receiveRate} items an hour, chilled first. Chilled left on the dock spoils quickly; nothing can be received into a full
-        stockroom.
-      </p>
+      <p className="tiny muted">~{CONFIG.staff.receiveRate} items an hour per person · chilled first</p>
       <ActionList state={state} plan={plan} onChange={onChange} actions={DEPTS.map((d) => ({ kind: 'emergency', dept: d }) as ActionRequest)} label={(a) => `Emergency: ${'dept' in a ? deptName(a.dept) : ''}`} />
     </>
   );
@@ -303,21 +296,16 @@ function BreakDetails({ state, plan }: { state: SimState; plan: HourPlan }) {
   const owed = staff.filter((s) => s.breaks === 0);
   return (
     <>
-      <p className="tiny">
-        A break restores {CONFIG.staff.energy.break} energy. Working more than {CONFIG.wellbeing.hoursBeforeBreakNeeded} hours in a row, or running low on energy, adds strain
-        that a late rest doesn’t undo.
-      </p>
+      <p className="tiny muted">Break: +{CONFIG.staff.energy.break} energy · seats for {CONFIG.staff.limits.break}</p>
       <ul className="break-list">
         {staff.map((s) => (
           <li key={s.id}>
-            <strong>{s.name}</strong> · energy {Math.round(s.energy)} · {s.consecutive}h since rest · {s.breaks ? `${s.breaks} break` : 'no break yet'}
+            <strong>{s.name}</strong> · {Math.round(s.energy)} energy · {s.consecutive}h worked · {s.breaks ? 'had a break' : 'no break yet'}
             {plan.assignments[s.id] === 'break' ? ' · on break this hour' : ''}
           </li>
         ))}
       </ul>
-      <p className="tiny muted">
-        {owed.length} still need{owed.length === 1 ? 's' : ''} a break; {CONFIG.hours - state.hour} hours left and two seats.
-      </p>
+      <p className="tiny muted">Still need a break: {owed.length}</p>
     </>
   );
 }
@@ -471,25 +459,9 @@ function StaffRow({
   const id = `job-${s.id}`;
   return (
     <li className={`staff-row ${selected ? 'staff-row-selected' : ''}`}>
-      <button type="button" className="staff-pick" aria-pressed={selected} onClick={onSelect} title="Select, then click a zone in the shop">
-        <span className="staff-name">{s.name}</span>
-        <span className="tiny muted">{selected ? 'Selected' : 'Select'}</span>
+      <button type="button" className="staff-pick" aria-pressed={selected} onClick={onSelect} title="Select, then click a place in the shop">
+        {s.name}
       </button>
-      <div className="staff-info">
-        <span className="tiny">{SPECIALITY_TEXT[s.speciality]}</span>
-        <div className="energy" aria-label={`Energy ${Math.round(s.energy)} out of 100, ${word}`}>
-          <span className="energy-bar">
-            <span className={`energy-fill energy-${word.toLowerCase()}`} style={{ width: `${s.energy}%` }} />
-          </span>
-          <span className="tiny">
-            {word} {Math.round(s.energy)}
-            {prod < 1 ? ` · ${Math.round(prod * 100)}% speed` : ''}
-          </span>
-        </div>
-        <span className="tiny muted">
-          {s.isTemp ? entry.bio : s.breaks > 0 ? `Had ${s.breaks} break${s.breaks > 1 ? 's' : ''}` : 'No break yet'} · {s.consecutive}h since rest
-        </span>
-      </div>
       <label className="sr-only" htmlFor={id}>
         Job for {s.name}
       </label>
@@ -499,11 +471,29 @@ function StaffRow({
           const full = n >= assignmentLimit(opt) && opt !== a;
           return (
             <option key={opt} value={opt} disabled={full}>
-              {ASSIGNMENT_LABEL[opt]} ({n}/{assignmentLimit(opt)}){full ? ' full' : ''}
+              {ASSIGNMENT_LABEL[opt]}
+              {full ? ' (full)' : ''}
             </option>
           );
         })}
       </select>
+      <div className="energy" aria-label={`Energy ${Math.round(s.energy)} out of 100, ${word}`}>
+        <span className="energy-bar">
+          <span className={`energy-fill energy-${word.toLowerCase()}`} style={{ width: `${s.energy}%` }} />
+        </span>
+        <span className="tiny">
+          {word}
+          {prod < 1 ? ` · ${Math.round(prod * 100)}% speed` : ''}
+        </span>
+      </div>
+      {selected && (
+        <div className="staff-more tiny">
+          <span>{SPECIALITY_TEXT[s.speciality]}</span>
+          <span className="muted">
+            Energy {Math.round(s.energy)} · {s.consecutive}h since rest · {s.isTemp ? entry.bio : s.breaks ? `${s.breaks} break` : 'no break yet'}
+          </span>
+        </div>
+      )}
     </li>
   );
 }
@@ -511,9 +501,6 @@ function StaffRow({
 function Commercial({ state, plan, onChange }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void }) {
   return (
     <section className="commercial" aria-label="Prices and actions">
-      <p className="tiny muted">
-        Lower prices bring more demand and goodwill but less margin per item. Higher prices do the opposite. Click a department in the shop for its details.
-      </p>
       {DEPTS.map((d) => (
         <div key={d} className="dept-block">
           <PriceSelector state={state} plan={plan} onChange={onChange} d={d} />

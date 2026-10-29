@@ -40,10 +40,27 @@ export interface StoreView {
   lorry: boolean;
   promo: DeptId[];
   markdown: DeptId[];
+  /** Short labels attached to a place in the shop, e.g. "Delivery: 12:00". */
+  notices: ShopNotice[];
   /** Changes every replay step so walk-in animations restart. */
   tick: string;
   clock: string;
 }
+
+export interface ShopNotice {
+  zone: ZoneId;
+  text: string;
+  tone: 'info' | 'warn';
+}
+
+const NOTICE_AT: Record<ZoneId, [number, number]> = {
+  dock: [486, 58],
+  produce: [146, 196],
+  chilled: [474, 248],
+  ambient: [800, 262],
+  break: [812, 52],
+  tills: [600, 448],
+};
 
 /** What each staff member is doing: working, standing idle (nothing to do), or just planned. */
 export type Activity = 'work' | 'idle' | 'plan';
@@ -64,11 +81,11 @@ interface Props {
 }
 
 const W = 1000;
-const H = 680;
-const LANE_Y = [468, 530, 592];
+const H = 700;
+const LANE_Y = [468, 538, 608];
 const QUEUE_FRONT_X = 780;
 const QUEUE_GAP = 22;
-const ENTRANCE: [number, number] = [130, 664];
+const ENTRANCE: [number, number] = [130, 684];
 
 /** Feet positions for each job. */
 const SLOTS: Record<AssignmentId, [number, number][]> = {
@@ -86,8 +103,8 @@ const SLOTS: Record<AssignmentId, [number, number][]> = {
     [806, 390],
   ],
   receive: [
-    [432, 116],
-    [520, 116],
+    [426, 106],
+    [546, 106],
   ],
   break: [
     [772, 128],
@@ -99,10 +116,27 @@ const ZONES: { z: ZoneId; x: number; y: number; w: number; h: number; badge: [nu
   { z: 'produce', x: 12, y: 156, w: 268, h: 278, badge: [226, 384] },
   { z: 'chilled', x: 300, y: 156, w: 688, h: 114, badge: [936, 158] },
   { z: 'ambient', x: 316, y: 272, w: 672, h: 160, badge: [936, 414] },
-  { z: 'tills', x: 316, y: 466, w: 672, h: 204, badge: [806, 440] },
+  { z: 'tills', x: 316, y: 466, w: 672, h: 224, badge: [806, 440] },
   { z: 'dock', x: 396, y: 12, w: 180, h: 134, badge: [524, 16] },
   { z: 'break', x: 704, y: 12, w: 284, h: 134, badge: [936, 16] },
 ];
+
+/** Where each placed employee stands (viewBox units), for tips that point at someone. */
+export function staffPositions(staff: StaffMember[], assignments: Record<string, AssignmentId>): Record<string, [number, number]> {
+  const counts = new Map<AssignmentId, number>();
+  const out: Record<string, [number, number]> = {};
+  for (const s of staff) {
+    const a = assignments[s.id];
+    if (!a) continue;
+    const i = counts.get(a) ?? 0;
+    counts.set(a, i + 1);
+    const slot = SLOTS[a][Math.min(i, SLOTS[a].length - 1)];
+    out[s.id] = [slot[0] + (i >= SLOTS[a].length ? 20 : 0), slot[1]];
+  }
+  return out;
+}
+
+export const STORE_SIZE = { w: 1000, h: 700 };
 
 function fillWord(f: number): string {
   if (f < 0.02) return 'Empty';
@@ -215,6 +249,7 @@ function StoreImpl(props: Props) {
         );
       })}
 
+      <Notices notices={view.notices} />
       <QueueFigures open={openTills} queue={view.queue} />
       <AisleShoppers view={view} motion={motion} />
       <WalkOuts view={view} motion={motion} />
@@ -611,34 +646,34 @@ function Checkouts({ open, queue }: { open: number; queue: number }) {
 function Entrance({ dropped }: { dropped: number }) {
   return (
     <g aria-hidden="true">
-      <rect x="56" y="666" width="150" height="10" fill="#cfe3ea" stroke="#8fb3c2" />
-      <rect x="66" y="624" width="130" height="34" rx="4" fill="var(--burgundy)" />
-      <text x="131" y="646" textAnchor="middle" fontSize="12" fill="var(--paper)" fontWeight="700" letterSpacing="1">
+      <rect x="56" y="686" width="150" height="10" fill="#cfe3ea" stroke="#8fb3c2" />
+      <rect x="66" y="644" width="130" height="34" rx="4" fill="var(--burgundy)" />
+      <text x="131" y="666" textAnchor="middle" fontSize="12" fill="var(--paper)" fontWeight="700" letterSpacing="1">
         WAY IN · WAY OUT
       </text>
-      <text x="131" y="616" textAnchor="middle" fontSize="9" fill="var(--muted)">
+      <text x="131" y="636" textAnchor="middle" fontSize="9" fill="var(--muted)">
         Please mind the step. It is famous.
       </text>
       {[0, 1, 2, 3].map((i) => (
-        <rect key={i} x="226" y={624 - i * 4} width="22" height="12" rx="2" fill="var(--burgundy)" opacity={0.7 + i * 0.08} stroke="var(--paper)" strokeWidth="0.8" />
+        <rect key={i} x="226" y={644 - i * 4} width="22" height="12" rx="2" fill="var(--burgundy)" opacity={0.7 + i * 0.08} stroke="var(--paper)" strokeWidth="0.8" />
       ))}
-      <text x="237" y="652" textAnchor="middle" fontSize="8" fill="var(--muted)">
+      <text x="237" y="672" textAnchor="middle" fontSize="8" fill="var(--muted)">
         baskets
       </text>
-      <rect x="24" y="490" width="250" height="88" rx="6" fill="rgba(255,255,255,0.35)" stroke="var(--line)" />
-      <text x="149" y="528" textAnchor="middle" fontSize="17" fill="var(--burgundy-dark)" fontFamily="var(--serif)" fontWeight="700">
+      <rect x="24" y="510" width="250" height="88" rx="6" fill="rgba(255,255,255,0.35)" stroke="var(--line)" />
+      <text x="149" y="548" textAnchor="middle" fontSize="17" fill="var(--burgundy-dark)" fontFamily="var(--serif)" fontWeight="700">
         Stockwell &amp; Co
       </text>
-      <text x="149" y="548" textAnchor="middle" fontSize="9.5" fill="var(--muted)" fontStyle="italic">
+      <text x="149" y="568" textAnchor="middle" fontSize="9.5" fill="var(--muted)" fontStyle="italic">
         Your neighbourhood grocer since 1987
       </text>
       {Array.from({ length: Math.min(10, Math.round(dropped)) }, (_, i) => (
-        <g key={i} transform={`translate(${296 + (i % 5) * 5} ${600 - Math.floor(i / 5) * 7 - (i % 2) * 2})`}>
+        <g key={i} transform={`translate(${296 + (i % 5) * 5} ${620 - Math.floor(i / 5) * 7 - (i % 2) * 2})`}>
           <DroppedBasket />
         </g>
       ))}
       {dropped >= 1 && (
-        <text x="306" y="618" textAnchor="middle" fontSize="8" fill="var(--bad)" fontWeight="700">
+        <text x="306" y="638" textAnchor="middle" fontSize="8" fill="var(--bad)" fontWeight="700">
           left behind
         </text>
       )}
@@ -734,6 +769,29 @@ function WalkOuts({ view, motion }: { view: StoreView; motion: boolean }) {
   );
 }
 
+function Notices({ notices }: { notices: ShopNotice[] }) {
+  const stack = new Map<ZoneId, number>();
+  return (
+    <g aria-hidden="true">
+      {notices.map((n, i) => {
+        const k = stack.get(n.zone) ?? 0;
+        stack.set(n.zone, k + 1);
+        const [x, y0] = NOTICE_AT[n.zone];
+        const y = y0 + k * 24;
+        const w = n.text.length * 6.6 + 20;
+        return (
+          <g key={i} className="notice">
+            <rect x={x - w / 2} y={y - 11} width={w} height="21" rx="10.5" fill={n.tone === 'warn' ? 'var(--mustard)' : 'var(--paper)'} stroke="var(--burgundy)" strokeWidth="1.5" />
+            <text x={x} y={y + 4} textAnchor="middle" fontSize="11.5" fontWeight="800" fill="var(--burgundy-dark)">
+              {n.text}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 function ZoneBadge({ x, y, n, lim }: { x: number; y: number; n: number; lim: number }) {
   return (
     <g className="zone-badge" aria-hidden="true">
@@ -785,7 +843,7 @@ function StaffToken({
       <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
       {selected && <ellipse cx="0" cy="0" rx="18" ry="6" fill="none" stroke="var(--mustard)" strokeWidth="3" />}
       <g className={act === 'work' ? 'busy' : ''}>
-        <g transform={a === 'tills' ? undefined : 'scale(1.15)'}>
+        <g transform={a === 'tills' ? 'scale(1.2)' : 'scale(1.4)'}>
           <StaffFigure id={s.id} pose={pose} tired={tired} />
         </g>
       </g>
@@ -805,7 +863,7 @@ function StaffToken({
 
 function Bubble({ text, tone }: { text: string; tone?: 'tired' }) {
   return (
-    <g className="bubble" transform="translate(12 -54)">
+    <g className="bubble" transform="translate(14 -62)">
       <rect x="-2" y="-9" width="16" height="13" rx="6" fill="var(--paper)" stroke={tone ? 'var(--mustard)' : 'var(--muted)'} />
       <text x="6" y="1" textAnchor="middle" fontSize="10" fontWeight="800" fill={tone ? '#7d5c0c' : 'var(--muted)'}>
         {text}
@@ -815,7 +873,7 @@ function Bubble({ text, tone }: { text: string; tone?: 'tired' }) {
 }
 
 export function storeViewFromState(
-  args: Omit<StoreView, 'arrivals' | 'abandoned' | 'dropped' | 'emptyDepts' | 'tick'> & { dropped?: number },
+  args: Omit<StoreView, 'arrivals' | 'abandoned' | 'dropped' | 'emptyDepts' | 'tick' | 'notices'> & { dropped?: number; notices?: ShopNotice[] },
 ): StoreView {
-  return { dropped: 0, ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
+  return { dropped: 0, notices: [], ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
 }

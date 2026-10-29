@@ -5,6 +5,7 @@ import {
   checkSetup,
   defaultPlan,
   middayRoomEstimate,
+  shortDatedUnits,
   describeAction,
   inventoryValue,
   operatingProfit,
@@ -601,5 +602,32 @@ describe('replay data matches the simulation', () => {
     }
     // The passive plan leaves fillers with nothing to move once the stockroom runs dry.
     expect(sawIdleFiller).toBe(true);
+  });
+});
+
+describe('first-shift tips and shop labels', () => {
+  it('walks through select, assign, run, one at a time', async () => {
+    const { activeTip } = await import('../ui/Coach');
+    expect(activeTip([], null)).toBe('select');
+    expect(activeTip([], 'mags')).toBe('assign');
+    expect(activeTip(['select'], null)).toBe('assign');
+    expect(activeTip(['select', 'assign'], null)).toBe('run');
+    expect(activeTip(['select', 'assign', 'run'], null)).toBeNull();
+  });
+  it('labels the dock and departments only when relevant', async () => {
+    const { shopNotices } = await import('../ui/Coach');
+    let state = startDay(SEED, recommendedSetup());
+    expect(shopNotices(state, defaultPlan(state)).some((n) => n.zone === 'dock')).toBe(false);
+    while (state.hour < 2) state = runHour(state, sensible(state)).state;
+    const notes = shopNotices(state, defaultPlan(state));
+    const midday = DEPTS.reduce((t, d) => t + recommendedSetup().orders[d].midday, 0);
+    expect(notes.find((n) => n.zone === 'dock')!.text).toBe(`Delivery: 12:00 · ${midday.toLocaleString('en-GB')} items`);
+    const friday = total([...state.stock.produce.shelf, ...state.stock.produce.backroom].filter((x) => x.label === "Friday's produce"));
+    expect(notes.some((n) => n.zone === 'produce' && n.text.startsWith('Expires 13:00'))).toBe(friday >= 1);
+    expect(notes.some((n) => n.zone === 'chilled')).toBe(false);
+    // Late in the day, unsold short-dated chilled is labelled on the chilled cabinets.
+    while (state.hour < 6) state = runHour(state, sensible(state)).state;
+    const late = shopNotices(state, defaultPlan(state));
+    expect(late.some((n) => n.zone === 'chilled' && n.text.startsWith('Expires tonight'))).toBe(shortDatedUnits(state, 'chilled') >= 1);
   });
 });

@@ -222,19 +222,19 @@ function prepareHour(state: SimState, waste: WasteLine[]): void {
     if (ev.kind === 'fridgeFault' && ev.hour === h && state.fridge.status === 'ok') {
       state.fridge.status = 'fault';
       notes.push(
-        `Chiller cabinet 2 has stopped humming, which is worse than when it hummed. Half the chilled shelf is out of use: move stock to the cold room (staff on Chilled do this first) or call an engineer.`,
+        `Chiller fault: half the chilled shelf is out of use. Staff on Chilled rescue the stock; the engineer fixes it.`,
       );
     }
   }
   // Expiry at the start of the hour.
   for (const d of DEPTS) expire(state, d, h, waste, notes);
   // Deliveries reaching the dock.
+  let arrived = 0;
   for (const del of state.deliveries.filter((x) => x.arrivesAt === h)) {
     S.add(state.stock[del.dept].dock, datedBatches(del.dept, del.qty, del.unitCost, del.life));
-    notes.push(
-      `${del.kind === 'emergency' ? 'Emergency' : 'Midday'} delivery: ${Math.round(del.qty)} ${deptName(del.dept).toLowerCase()} items are on the dock waiting to be received.`,
-    );
+    arrived += del.qty;
   }
+  if (arrived > 0) notes.push(`Delivery on the dock: ${Math.round(arrived)} items to receive.`);
   state.deliveries = state.deliveries.filter((x) => x.arrivesAt !== h);
   for (const s of state.staff) {
     if (s.isTemp && s.availableFrom === h) notes.push(`The agency temp has arrived and is asking where the toilets are.`);

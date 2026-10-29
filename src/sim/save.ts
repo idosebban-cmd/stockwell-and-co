@@ -26,9 +26,11 @@ export interface Settings {
   replaySpeed: 'normal' | 'fast';
   skipReplay: boolean;
   seenIntro: boolean;
+  /** First-shift tips already completed or dismissed. */
+  tipsDone: string[];
 }
 
-export const DEFAULT_SETTINGS: Settings = { reducedMotion: false, replaySpeed: 'normal', skipReplay: false, seenIntro: false };
+export const DEFAULT_SETTINGS: Settings = { reducedMotion: false, replaySpeed: 'normal', skipReplay: false, seenIntro: false, tipsDone: [] };
 
 export function getStorage(): StorageLike | null {
   try {
@@ -93,6 +95,7 @@ export function loadSettings(storage: StorageLike | null): Settings {
       replaySpeed: s.replaySpeed === 'fast' ? 'fast' : 'normal',
       skipReplay: typeof s.skipReplay === 'boolean' ? s.skipReplay : false,
       seenIntro: typeof s.seenIntro === 'boolean' ? s.seenIntro : false,
+      tipsDone: Array.isArray(s.tipsDone) ? s.tipsDone.filter((x): x is string => typeof x === 'string') : [],
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
