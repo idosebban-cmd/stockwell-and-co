@@ -1,4 +1,4 @@
-/** Pricing report: does one price tier dominate? Run with `npx vite-node scripts/pricing.ts`. */
+/** Pricing report: does one price tier dominate? Run with `npm run pricing`. */
 import { CONFIG, DEPTS, PRICE_TIERS, type DeptId, type PriceTier } from '../src/sim/config';
 import { fixLimits, playShift, sensible } from '../src/sim/bots';
 import { operatingProfit, recommendedSetup, satisfactionSoFar } from '../src/sim/engine';

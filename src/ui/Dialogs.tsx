@@ -44,10 +44,10 @@ export function Help({ onClose }: { onClose: () => void }) {
         </p>
         <h3>Each hour</h3>
         <ol>
-          <li>Read the Tannoy and the shift manager’s notes.</li>
-          <li>Give everyone a job: pick from their list, or select a person and click a zone in the shop.</li>
-          <li>Click a department, the tills, the dock or the break room to see its details, prices and actions (each shows cost and timing first).</li>
-          <li>Press “Run” (or R). Watch the replay, or skip it. Read why things happened.</li>
+          <li>Check <strong>Needs attention</strong> under the shop, or click a red or yellow “!” on a fixture. Each opens the problem with the actions that work, their cost and timing.</li>
+          <li>Click a person, then a highlighted place, to move them (or choose from the list in their panel). <strong>Team</strong> shows everyone at once.</li>
+          <li>Click a department to see its stock, who is filling it and its price. <strong>Change prices</strong> compares Low, Regular and High.</li>
+          <li>Press <strong>Run next hour</strong> (or R). Watch the replay or skip it, then read the short summary; <strong>View details</strong> has the rest.</li>
         </ol>
         <h3>How the shop works</h3>
         <ul>
@@ -67,8 +67,18 @@ export function Help({ onClose }: { onClose: () => void }) {
             <strong>Money:</strong> stock costs cash when bought but only becomes a cost when sold (or wasted). Unsold stock keeps its value.
           </li>
           <li>
+            <strong>Prices</strong> are the same products at a low, regular or high price. Lower prices sell more but earn less per item; fuller baskets take longer at the
+            tills. Which pays depends on the stock you have, how long it keeps and how busy the tills are.
+          </li>
+          <li>
             <strong>Dates:</strong> Friday’s produce goes past its best at 13:00. Chilled comes short-dated (“use by Sunday”, cheaper; binned at close if unsold, as we are closed Sundays) or longer-life (dearer, keeps). You choose per delivery when you customise the opening order. Cupboard stock keeps.
           </li>
+        </ul>
+        <h3>In the shop</h3>
+        <ul>
+          <li>“!” needs attention (red: urgent). “Low” or “Empty” beside a department: few items on the shelf.</li>
+          <li>“z” above someone: tired, working slower. “…”: nothing to do. “?” above a shopper: can’t find what they want.</li>
+          <li>Counts and energy show when you select a place or a person.</li>
         </ul>
         <h3>Keyboard</h3>
         <p>Tab through controls; Enter or Space to press. R runs the hour; Escape cancels a selection or closes this box.</p>

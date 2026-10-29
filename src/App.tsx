@@ -1,17 +1,17 @@
 import { useMemo, useState } from 'react';
-import { CONFIG } from './sim/config';
 import { recommendedSetup } from './sim/engine';
 import { getStorage } from './sim/save';
 import { CORE_LESSONS, LESSONS } from './sim/tutorial';
 import { useGame } from './ui/useGame';
 import { StatusBar } from './ui/StatusBar';
-import { PlanPanel } from './ui/PlanPanel';
-import { ReplayPanel, ResultsPanel } from './ui/ResultsPanel';
+import { GamePanel, runNote } from './ui/PlanPanel';
+import { ReplayPanel, SummaryCard } from './ui/ResultsPanel';
+import { GameTools } from './ui/ActionTools';
 import { Setup } from './ui/Setup';
 import { Closing } from './ui/Closing';
 import { Help, Menu, SettingsDialog } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
-import { basicsDone, LessonPanel, useTutorial } from './ui/Tutorial';
+import { basicsDone, LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
 
 export default function App() {
   const game = useGame();
@@ -42,6 +42,15 @@ export default function App() {
   };
 
   const t = tutorial;
+  const gamePrimary = () => {
+    if (game.phase === 'replay') return { label: 'Skip replay ▶', onClick: game.finishReplay };
+    if (game.phase === 'results') return { label: 'Close up and count the takings ▶', onClick: game.continueAfterResults };
+    if (game.phase === 'plan' && game.state && game.draft) {
+      const n = runNote(game.state, game.draft);
+      return { label: "Run next hour ▶", onClick: game.runNextHour, disabled: n.disabled, note: n.note, noteTone: n.tone };
+    }
+    return null;
+  };
   const lessonLabel = t.lesson.optional
     ? `Pricing ${t.index - CORE_LESSONS + 1} of ${LESSONS.length - CORE_LESSONS} · ${t.lesson.title}`
     : `Lesson ${t.index + 1} of ${CORE_LESSONS} · ${t.lesson.title}`;
@@ -74,7 +83,7 @@ export default function App() {
             replaySpeed={game.settings.replaySpeed}
             steps={t.lesson.steps}
             focus={t.phase === 'plan' ? t.lesson.focus(t.start, t.draft) : undefined}
-            showForecast={false}
+            primary={lessonPrimary(t, fullSaturday)}
             panel={(ctx) => <LessonPanel t={t} ctx={ctx} onFullSaturday={fullSaturday} />}
           />
         </>
@@ -101,29 +110,23 @@ export default function App() {
               reduced={reduced}
               replaySpeed={game.settings.replaySpeed}
               steps={6}
+              summaryOnPlan
+              primary={gamePrimary()}
+              tools={(ctx) => (
+                <GameTools state={game.state!} plan={game.draft} ctx={ctx} current={game.phase === 'replay' ? (game.lastReport?.hour ?? game.state!.hour) : game.state!.hour} planning={game.phase === 'plan'} />
+              )}
               panel={(ctx) =>
                 game.phase === 'plan' && game.draft ? (
-                  <PlanPanel
-                    state={game.state!}
-                    plan={game.draft}
-                    onChange={ctx.onPlanChange}
-                    selected={ctx.selected}
-                    onSelect={ctx.setSelected}
-                    context={ctx.context}
-                    onContext={ctx.setContext}
-                    onRun={game.runNextHour}
-                  />
+                  ctx.summary && !ctx.sel ? (
+                    <SummaryCard report={ctx.summary} onDismiss={ctx.dismissSummary} />
+                  ) : (
+                    <GamePanel state={game.state!} plan={game.draft} onChange={ctx.onPlanChange} sel={ctx.sel} setSel={ctx.setSel} />
+                  )
                 ) : game.phase === 'replay' && game.lastReport ? (
-                  <ReplayPanel report={game.lastReport} step={ctx.step} onSkip={game.finishReplay} />
+                  <ReplayPanel report={game.lastReport} step={ctx.step} />
                 ) : game.lastReport ? (
-                  <ResultsPanel report={game.lastReport} onContinue={game.continueAfterResults} last={game.state!.hour >= CONFIG.hours} />
-                ) : (
-                  <div className="panel-inner">
-                    <button type="button" className="btn-primary" onClick={game.continueAfterResults}>
-                      Continue
-                    </button>
-                  </div>
-                )
+                  <SummaryCard report={game.lastReport} />
+                ) : null
               }
             />
           )}

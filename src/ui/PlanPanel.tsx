@@ -28,8 +28,10 @@ import {
 } from '../sim/insight';
 import { ASSIGNMENT_LABEL, ROSTER, SPECIALITY_TEXT, TEMP_ENTRY } from '../sim/roster';
 import { total } from '../sim/stock';
-import { ASSIGNMENTS, type ActionRequest, type AssignmentId, type HourPlan, type SimState, type StaffMember } from '../sim/types';
+import { ASSIGNMENTS, type ActionRequest, type AssignmentId, type HourPlan, type SimState } from '../sim/types';
 import { ZONE_NAME, type ZoneId } from './Store';
+import { Forecast } from './Forecast';
+import type { Selection } from './ShopScreen';
 
 export function energyWord(e: number): string {
   if (e < CONFIG.staff.exhaustedBelow) return 'Exhausted';
@@ -47,94 +49,218 @@ export interface PanelOptions {
   pricing: 'all' | DeptId | 'none';
 }
 
-interface Props {
-  state: SimState;
-  plan: HourPlan;
-  onChange: (p: HourPlan) => void;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  context: ZoneId | null;
-  onContext: (z: ZoneId | null) => void;
-  onRun: () => void;
-  opts?: PanelOptions;
-}
-
 export const FULL_GAME: PanelOptions = { steps: 6, allowActions: true, pricing: 'all' };
 
 export function intervalLabel(steps: number): string {
   return steps >= 6 ? 'hour' : `${steps * 10} minutes`;
 }
 
-/** The full-game planning panel. */
-export function PlanPanel({ state, plan, onChange, selected, onSelect, context, onContext, onRun, opts = FULL_GAME }: Props) {
+/** Spend and blocking errors shown beside the run button. */
+export function runNote(state: SimState, plan: HourPlan): { note?: string; tone?: 'bad'; disabled: boolean } {
   const errors = planErrors(state, plan);
-  const [tab, setTab] = useState<'staff' | 'commercial'>('staff');
+  if (errors.length) return { note: errors[0], tone: 'bad', disabled: true };
+  const spend = plan.actions.reduce((t, a) => t + describeAction(state, a).cost, 0);
+  return { note: spend > 0 ? `Spending ${money(spend)} · cash after ${money(state.cash - spend)}` : undefined, disabled: false };
+}
+
+export function PanelHead({ title, kicker, onClose }: { title: string; kicker?: string; onClose?: () => void }) {
   return (
-    <div className="panel-inner">
-      <section className="hour-head">
-        <h2>{hourRange(state.hour)}</h2>
-        <p className="muted">~{Math.round(expectedCustomers(state))} customers expected</p>
-        {state.announcements.length > 0 && (
-          <div className="tannoy" role="status">
-            <ul>
-              {state.announcements.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-
-      {context ? (
-        <ContextCard state={state} plan={plan} onChange={onChange} zone={context} onClose={() => onContext(null)} opts={opts} onOpen={onContext} />
-      ) : (
-        <OutlookPanel state={state} plan={plan} steps={opts.steps} onOpen={onContext} />
-      )}
-
-      <div className="tabs" role="tablist" aria-label="Decisions">
-        <button role="tab" type="button" aria-selected={tab === 'staff'} className={tab === 'staff' ? 'tab tab-on' : 'tab'} onClick={() => setTab('staff')}>
-          Staff
-        </button>
-        <button
-          role="tab"
-          type="button"
-          aria-selected={tab === 'commercial'}
-          className={tab === 'commercial' ? 'tab tab-on' : 'tab'}
-          onClick={() => setTab('commercial')}
-        >
-          Prices &amp; actions{plan.actions.length ? ` (${plan.actions.length})` : ''}
-        </button>
+    <div className="panel-head">
+      <div>
+        {kicker && <p className="panel-kicker">{kicker}</p>}
+        <h2>{title}</h2>
       </div>
-      {tab === 'staff' ? (
-        <StaffList state={state} plan={plan} onChange={onChange} selected={selected} onSelect={onSelect} />
-      ) : (
-        <Commercial state={state} plan={plan} onChange={onChange} onOpen={onContext} />
+      {onClose && (
+        <button type="button" className="panel-x" onClick={onClose} aria-label={`Close ${title}`}>
+          ✕
+        </button>
       )}
-
-      <RunBar errors={errors} onRun={onRun} label={`Run ${intervalLabel(opts.steps)} ▶`} plan={plan} state={state} />
     </div>
   );
 }
 
-export function RunBar({ errors, onRun, label, plan, state }: { errors: string[]; onRun: () => void; label: string; plan?: HourPlan; state?: SimState }) {
-  const spend = plan && state ? plan.actions.reduce((t, a) => t + describeAction(state, a).cost, 0) : 0;
+interface GameProps {
+  state: SimState;
+  plan: HourPlan;
+  onChange: (p: HourPlan) => void;
+  sel: Selection;
+  setSel: (s: Selection) => void;
+  opts?: PanelOptions;
+}
+
+/** The one contextual panel for the full game while planning. */
+export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME }: GameProps) {
+  const close = () => setSel(null);
+  const open = (z: ZoneId) => setSel({ kind: 'zone', zone: z });
+  if (!sel) return <IdlePanel state={state} />;
+  switch (sel.kind) {
+    case 'staff':
+      return <StaffCard state={state} plan={plan} onChange={onChange} id={sel.id} onClose={close} />;
+    case 'zone':
+      return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} />;
+    case 'attention':
+      return <AttentionPanel state={state} plan={plan} onOpen={open} onClose={close} onOutlook={() => setSel({ kind: 'outlook' })} />;
+    case 'team':
+      return (
+        <div className="panel-inner">
+          <PanelHead title="Team" kicker={hourRange(state.hour)} onClose={close} />
+          <StaffList state={state} plan={plan} onChange={onChange} onSelect={(id) => setSel({ kind: 'staff', id })} />
+        </div>
+      );
+    case 'forecast':
+      return (
+        <div className="panel-inner">
+          <PanelHead title="Forecast" kicker="Customers per hour" onClose={close} />
+          <Forecast scenario={state.scenario} currentHour={state.hour} knownUpTo={state.hour} reports={state.history} />
+          <ShopKey />
+        </div>
+      );
+    case 'outlook':
+      return (
+        <div className="panel-inner">
+          <PanelHead title={`Next ${intervalLabel(opts.steps)}`} kicker="Estimate from the forecast" onClose={close} />
+          <OutlookPanel state={state} plan={plan} steps={opts.steps} onOpen={open} />
+        </div>
+      );
+  }
+}
+
+/** Nothing selected: the hour, any announcements, and how to start. */
+function IdlePanel({ state }: { state: SimState }) {
   return (
-    <div className="run-bar">
-      {errors.length > 0 && (
-        <ul className="errors" role="alert">
-          {errors.map((e, i) => (
-            <li key={i}>{e}</li>
+    <div className="panel-inner idle">
+      <PanelHead title={hourRange(state.hour)} kicker={`~${Math.round(expectedCustomers(state))} customers expected`} />
+      {state.announcements.length > 0 && (
+        <ul className="tannoy" aria-label="Announcements">
+          {state.announcements.map((a, i) => (
+            <li key={i}>{a}</li>
           ))}
         </ul>
       )}
-      {state && spend > 0 && (
-        <p className="tiny run-spend">
-          Spending {money(spend)} · cash after {money(state.cash - spend)}
-        </p>
+      <p className="idle-hint">Select a person or a place in the shop to see what you can do there.</p>
+    </div>
+  );
+}
+
+/** Everything that needs a decision, most urgent first. Selecting one opens its actions. */
+export function attentionItems(state: SimState, plan: HourPlan) {
+  const look = computeOutlook(state, plan);
+  return computeProblems(state, plan, look).sort((a, b) => (a.level === b.level ? 0 : a.level === 'urgent' ? -1 : 1));
+}
+
+function AttentionPanel({ state, plan, onOpen, onClose, onOutlook }: { state: SimState; plan: HourPlan; onOpen: (z: ZoneId) => void; onClose: () => void; onOutlook: () => void }) {
+  const items = useMemo(() => attentionItems(state, plan), [state, plan]);
+  return (
+    <div className="panel-inner">
+      <PanelHead title="Needs attention" kicker={hourRange(state.hour)} onClose={onClose} />
+      {items.length === 0 ? (
+        <p className="idle-hint">Nothing needs attention with this plan.</p>
+      ) : (
+        <ul className="attention-list">
+          {items.map((p) => (
+            <li key={p.title}>
+              <button type="button" className={`attention-item ${p.level}`} onClick={() => onOpen(p.zone)}>
+                <span className="att-mark" aria-hidden="true">
+                  !
+                </span>
+                <span>
+                  <strong>{p.title}</strong>
+                  <span className="att-where">{ZONE_NAME[p.zone]} · see actions</span>
+                </span>
+                <span className="sr-only">{p.level === 'urgent' ? ' (urgent)' : ''}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-      <button type="button" className="btn-primary btn-run" disabled={errors.length > 0} onClick={onRun}>
-        {label}
+      <button type="button" className="btn-link" onClick={onOutlook}>
+        Outlook for the hour (estimates)
       </button>
+    </div>
+  );
+}
+
+function ShopKey() {
+  return (
+    <ul className="legend" aria-label="Key">
+      <li>
+        <span aria-hidden="true">!</span> needs attention: click it
+      </li>
+      <li>
+        <span aria-hidden="true">z</span> tired, slower
+      </li>
+      <li>
+        <span aria-hidden="true">…</span> nothing to do
+      </li>
+      <li>
+        <span aria-hidden="true">?</span> shopper can’t find stock
+      </li>
+    </ul>
+  );
+}
+
+/** The selected employee: current job, energy, what each job would achieve. */
+export function StaffCard({ state, plan, onChange, id, onClose, jobs }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; id: string; onClose: () => void; jobs?: AssignmentId[] }) {
+  const s = state.staff.find((x) => x.id === id);
+  if (!s) return null;
+  const a = plan.assignments[s.id];
+  const prod = productivity(s.energy);
+  const word = energyWord(s.energy);
+  const current = a ? jobPreview(state, plan, s.id, a) : null;
+  const entry = ROSTER.find((r) => r.id === s.id) ?? TEMP_ENTRY;
+  return (
+    <div className="panel-inner">
+      <PanelHead title={s.name} kicker="Selected" onClose={onClose} />
+      <dl className="facts">
+        <dt>Now</dt>
+        <dd>
+          {a ? ASSIGNMENT_LABEL[a] : '—'}
+          {current && (current.blocked && a !== 'break' ? <span className="bad"> · {current.blocked}</span> : ` · ${current.yield}`)}
+        </dd>
+        <dt>Energy</dt>
+        <dd>
+          <span className="energy" aria-label={`Energy ${Math.round(s.energy)} out of 100, ${word}`}>
+            <span className="energy-bar">
+              <span className={`energy-fill energy-${word.toLowerCase()}`} style={{ width: `${s.energy}%` }} />
+            </span>
+            {word} {Math.round(s.energy)}
+            {prod < 1 ? ` · working at ${Math.round(prod * 100)}%` : ''}
+          </span>
+        </dd>
+      </dl>
+      <p className="picker-title">Move to</p>
+      <ul className="job-options">
+        {(jobs ?? ASSIGNMENTS).map((j) => {
+          const pv = jobPreview(state, plan, s.id, j);
+          const n = Object.values(plan.assignments).filter((x) => x === j).length;
+          const here = j === a;
+          const off = !here && (pv.full || !!pv.blocked);
+          return (
+            <li key={j}>
+              <button
+                type="button"
+                className={`job-option ${here ? 'here' : ''}`}
+                disabled={here || pv.full}
+                aria-pressed={here}
+                onClick={() => {
+                  onChange({ ...plan, assignments: { ...plan.assignments, [s.id]: j } });
+                  onClose();
+                }}
+              >
+                <span className="jo-name">{ASSIGNMENT_LABEL[j]}</span>
+                <span className={`jo-yield ${off ? 'bad' : ''}`}>{here ? 'Current job' : pv.full ? `Full (${n}/${assignmentLimit(j)})` : (pv.blocked ?? pv.yield)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="tiny muted">Or click a highlighted place in the shop.</p>
+      <details className="more">
+        <summary>About {s.name}</summary>
+        <p className="tiny">
+          {SPECIALITY_TEXT[s.speciality]}. {s.consecutive}h since a rest · {s.isTemp ? entry.bio : s.breaks ? `${s.breaks} break so far` : 'no break yet'}.
+        </p>
+      </details>
     </div>
   );
 }
@@ -157,10 +283,7 @@ export function OutlookPanel({ state, plan, steps, onOpen }: { state: SimState; 
   const urgent = probs.filter((p) => p.level === 'urgent' && !look.rows.some((r) => r.zone === p.zone && r.status !== 'ok'));
   const notes = previewWarnings(state, plan).filter((n) => n.kind === 'event' || n.kind === 'waste' || (n.kind === 'staff' && n.level === 'warn' && !n.text.includes('reduced capacity')));
   return (
-    <section className="outlook" aria-labelledby="outlook-h">
-      <h3 id="outlook-h">
-        Next {intervalLabel(steps)} <span className="est">estimate</span>
-      </h3>
+    <section className="outlook" aria-label={`Next ${intervalLabel(steps)}: estimate`}>
       {urgent.map((p) => (
         <button key={p.title} type="button" className="problem-chip urgent" onClick={() => onOpen(p.zone)}>
           <span aria-hidden="true">!</span> {p.title}
@@ -229,13 +352,8 @@ export function ContextCard({
   onOpen?: (z: ZoneId) => void;
 }) {
   return (
-    <section className="context-card" aria-labelledby="ctx-h">
-      <div className="context-head">
-        <h3 id="ctx-h">{ZONE_NAME[zone]}</h3>
-        <button type="button" className="callout-x dark" onClick={onClose} aria-label={`Close ${ZONE_NAME[zone]}`}>
-          ✕
-        </button>
-      </div>
+    <section className="panel-inner context-card" aria-label={ZONE_NAME[zone]}>
+      <PanelHead title={ZONE_NAME[zone]} kicker="Selected" onClose={onClose} />
       {zone === 'chilled' && state.fridge.status === 'fault' && <FridgeCard state={state} plan={plan} onChange={onChange} allowActions={opts.allowActions} />}
       {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptCard state={state} plan={plan} onChange={onChange} d={zone} opts={opts} onOpen={onOpen} />}
       {zone === 'tills' && <TillCard state={state} plan={plan} onChange={onChange} opts={opts} />}
@@ -311,6 +429,7 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
   const friday = d === 'produce' ? total([...state.stock.produce.shelf, ...state.stock.produce.backroom].filter((b) => b.label === "Friday's produce")) : 0;
   const incoming = state.deliveries.filter((x) => x.dept === d);
   const problem = row && row.status !== 'ok';
+  const [pricesOpen, setPricesOpen] = useState(opts.pricing === d);
   const actions: ActionRequest[] = [];
   if (opts.allowActions) {
     if (CONFIG.departments[d].perishable) actions.push({ kind: 'markdown', dept: d });
@@ -367,8 +486,10 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
         <dt>Filling</dt>
         <dd>{fillers.length ? fillers.map((s) => s.name).join(', ') : 'nobody'}</dd>
       </dl>
-      <StaffPicker state={state} plan={plan} onChange={onChange} job={job} title={fillers.length ? 'Add another filler' : 'Put someone on these shelves'} compact={!problem} />
-      {(opts.pricing === 'all' || opts.pricing === d) && <PriceComparison state={state} plan={plan} onChange={onChange} d={d} steps={opts.steps} />}
+      {!pricesOpen && <StaffPicker state={state} plan={plan} onChange={onChange} job={job} title={fillers.length ? 'Add another filler' : 'Put someone on these shelves'} compact={!problem} />}
+      {(opts.pricing === 'all' || opts.pricing === d) && (
+        <PriceSection state={state} plan={plan} onChange={onChange} d={d} steps={opts.steps} fixed={opts.pricing === d} open={pricesOpen} setOpen={setPricesOpen} />
+      )}
       {actions.length > 0 && (
         <details className="more-actions">
           <summary>More actions</summary>
@@ -534,8 +655,45 @@ function StaffPicker({ state, plan, onChange, job, title, compact }: { state: Si
 }
 
 // ---------------------------------------------------------------------------
-// Price comparison
+// Price comparison (only when the player asks for it)
 // ---------------------------------------------------------------------------
+
+function PriceSection({
+  state,
+  plan,
+  onChange,
+  d,
+  steps,
+  fixed,
+  open,
+  setOpen,
+}: {
+  state: SimState;
+  plan: HourPlan;
+  onChange: (p: HourPlan) => void;
+  d: DeptId;
+  steps: number;
+  fixed: boolean;
+  open: boolean;
+  setOpen: (f: (o: boolean) => boolean) => void;
+}) {
+  const tier = plan.pricing[d];
+  return (
+    <div className="price-section">
+      <div className="price-line">
+        <span>
+          Price: <strong>{CONFIG.pricing[tier].label}</strong> {money(CONFIG.departments[d].standardPrice * CONFIG.pricing[tier].priceMult)}
+        </span>
+        {!fixed && (
+          <button type="button" className="btn-action" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide prices' : 'Change prices'}
+          </button>
+        )}
+      </div>
+      {open && <PriceComparison state={state} plan={plan} onChange={onChange} d={d} steps={steps} />}
+    </div>
+  );
+}
 
 export function PriceComparison({ state, plan, onChange, d, steps }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId; steps: number }) {
   const opts = useMemo(() => priceOptions(state, plan, d, steps), [state, plan, d, steps]);
@@ -553,13 +711,13 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
   return (
     <div className="price-compare">
       <p className="picker-title">
-        Price <span className="est">estimate · next {intervalLabel(steps)}</span>
+        <span className="est">Estimate · next {intervalLabel(steps)}</span>
       </p>
       <table>
         <thead>
           <tr>
-            <th scope="col">Option</th>
             <th scope="col">Price</th>
+            <th scope="col">Each</th>
             <th scope="col">Margin</th>
             <th scope="col">Sold</th>
             <th scope="col">Gross profit</th>
@@ -570,7 +728,7 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
             <tr key={o.tier} className={o.tier === tier ? 'pc-on' : ''} onClick={() => set(o.tier)}>
               <th scope="row">
                 <label>
-                  <input type="radio" name={`pc-${d}`} checked={o.tier === tier} onChange={() => set(o.tier)} /> {CONFIG.pricing[o.tier].label}
+                  <input type="radio" name={`pc-${d}`} checked={o.tier === tier} onChange={() => set(o.tier)} /> {CONFIG.pricing[o.tier].short}
                 </label>
               </th>
               <td>{money(o.price)}</td>
@@ -596,7 +754,7 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
               <th scope="col"></th>
               {opts.map((o) => (
                 <th key={o.tier} scope="col">
-                  {CONFIG.pricing[o.tier].label}
+                  {CONFIG.pricing[o.tier].short}
                 </th>
               ))}
             </tr>
@@ -621,6 +779,18 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
               ))}
             </tr>
             <tr>
+              <th scope="row">Binned (cost)</th>
+              {opts.map((o) => (
+                <td key={o.tier}>~£{Math.round(o.waste)}</td>
+              ))}
+            </tr>
+            <tr>
+              <th scope="row">Gross profit after waste</th>
+              {opts.map((o) => (
+                <td key={o.tier}>~£{Math.round(o.grossProfit - o.waste)}</td>
+              ))}
+            </tr>
+            <tr>
               <th scope="row">Left after</th>
               {opts.map((o) => (
                 <td key={o.tier}>~{Math.round(o.leftover)}</td>
@@ -642,7 +812,10 @@ export function PriceComparison({ state, plan, onChange, d, steps }: { state: Si
             </tr>
           </tbody>
         </table>
-        <p className="tiny muted">Sold = paid at the tills, limited by stock, shelf-filling and checkout. Estimates use the forecast; real footfall varies.</p>
+        <p className="tiny muted">
+          Sold = paid at the tills, limited by stock, shelf-filling and checkout. Fuller baskets take longer to scan. Quality is the same at every price. Estimates use the
+          forecast; real footfall varies.
+        </p>
       </details>
     </div>
   );
@@ -726,21 +899,8 @@ function ActionList({
   );
 }
 
-export function StaffList({
-  state,
-  plan,
-  onChange,
-  selected,
-  onSelect,
-  highlight = [],
-}: {
-  state: SimState;
-  plan: HourPlan;
-  onChange: (p: HourPlan) => void;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  highlight?: string[];
-}) {
+/** Team overview: everyone's job (changeable here too), energy and speed. */
+export function StaffList({ state, plan, onChange, onSelect }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; onSelect: (id: string) => void }) {
   const staff = onShift(state);
   const coming = state.staff.filter((s) => s.availableFrom > state.hour && s.availableFrom < 99);
   const counts = new Map<AssignmentId, number>();
@@ -748,140 +908,52 @@ export function StaffList({
     const a = plan.assignments[s.id];
     if (a) counts.set(a, (counts.get(a) ?? 0) + 1);
   }
-  const assign = (id: string, a: AssignmentId) => onChange({ ...plan, assignments: { ...plan.assignments, [id]: a } });
   return (
     <section className="staff-list" aria-label="Staff assignments">
       <ul>
-        {staff.map((s) => (
-          <StaffRow
-            key={s.id}
-            s={s}
-            a={plan.assignments[s.id]}
-            counts={counts}
-            selected={selected === s.id}
-            lesson={highlight.includes(s.id)}
-            onSelect={() => onSelect(selected === s.id ? null : s.id)}
-            onAssign={(a) => assign(s.id, a)}
-            state={state}
-            plan={plan}
-          />
-        ))}
+        {staff.map((s) => {
+          const a = plan.assignments[s.id];
+          const word = energyWord(s.energy);
+          const prod = productivity(s.energy);
+          const current = a ? jobPreview(state, plan, s.id, a) : null;
+          const blocked = current?.blocked && a !== 'break' ? current.blocked : null;
+          const id = `job-${s.id}`;
+          return (
+            <li key={s.id} className="staff-row">
+              <button type="button" className="staff-pick" onClick={() => onSelect(s.id)}>
+                {s.name}
+              </button>
+              <label className="sr-only" htmlFor={id}>
+                Job for {s.name}
+              </label>
+              <select id={id} value={a ?? ''} onChange={(e) => onChange({ ...plan, assignments: { ...plan.assignments, [s.id]: e.target.value as AssignmentId } })}>
+                {ASSIGNMENTS.map((opt) => {
+                  const full = (counts.get(opt) ?? 0) >= assignmentLimit(opt) && opt !== a;
+                  return (
+                    <option key={opt} value={opt} disabled={full}>
+                      {ASSIGNMENT_LABEL[opt]}
+                      {full ? ' (full)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="energy" aria-label={`Energy ${Math.round(s.energy)} out of 100, ${word}`}>
+                <span className="energy-bar">
+                  <span className={`energy-fill energy-${word.toLowerCase()}`} style={{ width: `${s.energy}%` }} />
+                </span>
+                {word}
+                {prod < 1 ? ` · ${Math.round(prod * 100)}%` : ''}
+              </span>
+              {blocked && <p className="row-warn">✕ {blocked}</p>}
+            </li>
+          );
+        })}
       </ul>
       {coming.map((s) => (
         <p key={s.id} className="tiny note-info">
           {s.name} arrives at {hourLabel(s.availableFrom)}.
         </p>
       ))}
-    </section>
-  );
-}
-
-function StaffRow({
-  s,
-  a,
-  counts,
-  selected,
-  lesson,
-  onSelect,
-  onAssign,
-  state,
-  plan,
-}: {
-  s: StaffMember;
-  a: AssignmentId | undefined;
-  counts: Map<AssignmentId, number>;
-  selected: boolean;
-  lesson: boolean;
-  onSelect: () => void;
-  onAssign: (a: AssignmentId) => void;
-  state: SimState;
-  plan: HourPlan;
-}) {
-  const entry = ROSTER.find((r) => r.id === s.id) ?? TEMP_ENTRY;
-  const prod = productivity(s.energy);
-  const word = energyWord(s.energy);
-  const id = `job-${s.id}`;
-  const current = a ? jobPreview(state, plan, s.id, a) : null;
-  const blocked = current?.blocked && a !== 'break' ? current.blocked : null;
-  return (
-    <li className={`staff-row ${selected ? 'staff-row-selected' : ''} ${lesson ? 'staff-row-lesson' : ''}`}>
-      <button type="button" className="staff-pick" aria-pressed={selected} onClick={onSelect} title="Select, then click a place in the shop">
-        {s.name}
-      </button>
-      <label className="sr-only" htmlFor={id}>
-        Job for {s.name}
-      </label>
-      <select id={id} value={a ?? ''} onChange={(e) => onAssign(e.target.value as AssignmentId)}>
-        {ASSIGNMENTS.map((opt) => {
-          const n = counts.get(opt) ?? 0;
-          const full = n >= assignmentLimit(opt) && opt !== a;
-          return (
-            <option key={opt} value={opt} disabled={full}>
-              {ASSIGNMENT_LABEL[opt]}
-              {full ? ' (full)' : ''}
-            </option>
-          );
-        })}
-      </select>
-      <div className="energy" aria-label={`Energy ${Math.round(s.energy)} out of 100, ${word}`}>
-        <span className="energy-bar">
-          <span className={`energy-fill energy-${word.toLowerCase()}`} style={{ width: `${s.energy}%` }} />
-        </span>
-        <span className="tiny">
-          {word}
-          {prod < 1 ? ` · ${Math.round(prod * 100)}% speed` : ''}
-        </span>
-      </div>
-      {blocked && <p className="row-warn tiny">✕ {blocked}</p>}
-      {selected && (
-        <div className="staff-more tiny">
-          <span>
-            Now: {a ? ASSIGNMENT_LABEL[a] : '—'}
-            {current && !blocked ? ` · ${current.yield}` : ''}
-          </span>
-          <span>{SPECIALITY_TEXT[s.speciality]}</span>
-          <span className="muted">
-            Energy {Math.round(s.energy)} · {s.consecutive}h since rest · {s.isTemp ? entry.bio : s.breaks ? `${s.breaks} break` : 'no break yet'}
-          </span>
-        </div>
-      )}
-    </li>
-  );
-}
-
-function Commercial({ state, plan, onChange, onOpen }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; onOpen: (z: ZoneId) => void }) {
-  return (
-    <section className="commercial" aria-label="Prices and actions">
-      {state.fridge.status === 'fault' && (
-        <button type="button" className="problem-chip urgent" onClick={() => onOpen('chilled')}>
-          ! Chiller fault: see responses
-        </button>
-      )}
-      {DEPTS.map((d) => (
-        <div key={d} className="dept-block">
-          <div className="dept-block-head">
-            <strong>{deptName(d)}</strong>
-            <button type="button" className="btn-link" onClick={() => onOpen(d)}>
-              {CONFIG.pricing[plan.pricing[d]].label} · compare prices
-            </button>
-          </div>
-          <ActionList
-            state={state}
-            plan={plan}
-            onChange={onChange}
-            actions={[
-              ...(CONFIG.departments[d].perishable ? [{ kind: 'markdown', dept: d } as ActionRequest] : []),
-              { kind: 'promotion', dept: d },
-              { kind: 'emergency', dept: d },
-            ]}
-            label={actionShortLabel}
-          />
-        </div>
-      ))}
-      <div className="dept-block">
-        <strong className="tiny">Extra help</strong>
-        <ActionList state={state} plan={plan} onChange={onChange} actions={[{ kind: 'temp' }]} label={() => 'Book an agency temp'} />
-      </div>
     </section>
   );
 }

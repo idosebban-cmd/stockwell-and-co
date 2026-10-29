@@ -8,9 +8,9 @@ import { planErrors } from '../sim/engine';
 import type { StorageLike } from '../sim/save';
 import { CORE_LESSONS, LESSONS, lessonPlan, runLesson, type LessonResult } from '../sim/tutorial';
 import type { HourPlan, HourReport, SimState } from '../sim/types';
-import { ContextCard, intervalLabel, OutlookPanel, PriceComparison, RunBar, StaffList, type PanelOptions } from './PlanPanel';
+import { ContextCard, intervalLabel, PriceComparison, StaffCard, type PanelOptions } from './PlanPanel';
 import { ReplayPanel } from './ResultsPanel';
-import type { PanelContext } from './ShopScreen';
+import type { PanelContext, PrimaryAction } from './ShopScreen';
 
 export const TUTORIAL_KEY = 'stockwell-and-co:tutorial';
 
@@ -133,52 +133,55 @@ export function useTutorial(storage: StorageLike | null, skipReplay: boolean) {
 
 export type Tutorial = ReturnType<typeof useTutorial>;
 
-/** Side panel for the guided shift. */
+/** The action bar's main button during the guided shift. */
+export function lessonPrimary(t: Tutorial, onFullSaturday: () => void): PrimaryAction | null {
+  if (t.phase === 'basics' || t.phase === 'finished') return { label: 'Start a full Saturday ▶', onClick: onFullSaturday };
+  if (t.phase === 'replay') return { label: 'Skip replay ▶', onClick: t.finishReplay };
+  if (t.phase === 'results' && t.run) {
+    const last = t.index === CORE_LESSONS - 1 || t.index === LESSONS.length - 1;
+    return t.run.result.passed ? { label: last ? 'Finish ▶' : 'Next lesson ▶', onClick: t.next } : { label: 'Try again ▶', onClick: t.retry };
+  }
+  const errors = planErrors(t.start, t.draft);
+  return { label: `Run ${intervalLabel(t.lesson.steps)} ▶`, onClick: t.runNow, disabled: errors.length > 0, note: errors[0], noteTone: errors.length ? 'bad' : undefined };
+}
+
+/** Side panel for the guided shift: one instruction, then whatever is selected. */
 export function LessonPanel({ t, ctx, onFullSaturday }: { t: Tutorial; ctx: PanelContext; onFullSaturday: () => void }) {
   const { lesson, index } = t;
   const core = !lesson.optional;
-  const n = core ? `${index + 1} of ${CORE_LESSONS}` : `pricing ${index - CORE_LESSONS + 1} of ${LESSONS.length - CORE_LESSONS}`;
+  const kicker = core ? `Lesson ${index + 1} of ${CORE_LESSONS} · ${lesson.title}` : `Pricing lesson ${index - CORE_LESSONS + 1} of ${LESSONS.length - CORE_LESSONS}`;
   const focus = lesson.focus(t.start, t.draft);
   const opts: PanelOptions = useMemo(() => ({ steps: lesson.steps, allowActions: false, pricing: focus.priceDept ?? 'none' }), [lesson.steps, focus.priceDept]);
 
   if (t.phase === 'basics')
     return (
       <div className="panel-inner lesson">
-        <p className="lesson-kicker">Basics done</p>
+        <p className="panel-kicker">Basics done</p>
         <h2>You can run the shop.</h2>
         <p>Serving, filling, unloading, breaks and trade-offs: that is the whole job.</p>
-        <div className="lesson-buttons">
-          <button type="button" className="btn-primary" onClick={onFullSaturday} autoFocus>
-            Start a full Saturday ▶
-          </button>
-          <button type="button" className="btn-secondary" onClick={t.startPricing}>
-            Pricing lessons (2 short)
-          </button>
-        </div>
+        <button type="button" className="btn-secondary" onClick={t.startPricing}>
+          Pricing lessons (2 short)
+        </button>
       </div>
     );
   if (t.phase === 'finished')
     return (
       <div className="panel-inner lesson">
-        <p className="lesson-kicker">All lessons done</p>
+        <p className="panel-kicker">All lessons done</p>
         <h2>Ready for Saturday.</h2>
-        <div className="lesson-buttons">
-          <button type="button" className="btn-primary" onClick={onFullSaturday} autoFocus>
-            Start a full Saturday ▶
-          </button>
-        </div>
+        <button type="button" className="btn-link" onClick={onFullSaturday}>
+          Start a full Saturday
+        </button>
       </div>
     );
-  if (t.phase === 'replay' && t.run) return <ReplayPanel report={t.run.report} step={ctx.step} onSkip={t.finishReplay} />;
+  if (t.phase === 'replay' && t.run) return <ReplayPanel report={t.run.report} step={ctx.step} />;
   if (t.phase === 'results' && t.run) {
     const r = t.run.result;
     const compare = t.attempts.length > 1;
     const choiceLesson = lesson.id === 'tradeoff' || lesson.optional;
     return (
       <div className="panel-inner lesson">
-        <p className="lesson-kicker">
-          Lesson {n} · {lesson.title}
-        </p>
+        <p className="panel-kicker">{kicker}</p>
         <p className={`lesson-result ${r.passed ? 'pass' : 'fail'}`} role="status">
           <span aria-hidden="true">{r.passed ? '✓' : '!'}</span> {r.sentence}
         </p>
@@ -218,37 +221,25 @@ export function LessonPanel({ t, ctx, onFullSaturday }: { t: Tutorial; ctx: Pane
         )}
         <div className="lesson-buttons">
           {r.passed ? (
-            <>
-              <button type="button" className="btn-primary" onClick={t.next} autoFocus>
-                {index === CORE_LESSONS - 1 || index === LESSONS.length - 1 ? 'Finish ▶' : 'Next lesson ▶'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={t.retry}>
-                {choiceLesson ? 'Try another choice' : 'Try again'}
-              </button>
-            </>
+            <button type="button" className="btn-secondary" onClick={t.retry}>
+              {choiceLesson ? 'Try another choice' : 'Try again'}
+            </button>
           ) : (
-            <>
-              <button type="button" className="btn-primary" onClick={t.retry} autoFocus>
-                Try again
-              </button>
-              <button type="button" className="btn-link" onClick={t.skipLesson}>
-                Skip this lesson
-              </button>
-            </>
+            <button type="button" className="btn-link" onClick={t.skipLesson}>
+              Skip this lesson
+            </button>
           )}
         </div>
       </div>
     );
   }
   const checks = lesson.checklist(t.start, t.draft);
-  const errors = planErrors(t.start, t.draft);
+  const sel = ctx.sel;
   return (
     <div className="panel-inner lesson">
-      <p className="lesson-kicker">
-        Lesson {n} · {lesson.title}
-      </p>
+      <p className="panel-kicker">{kicker}</p>
       <h2 className="lesson-objective">{lesson.objective}</h2>
-      {!lesson.optional && (
+      {!lesson.optional && checks.length > 1 && (
         <ul className="checklist">
           {checks.map((c) => (
             <li key={c.label} className={c.done ? 'done' : ''}>
@@ -258,15 +249,18 @@ export function LessonPanel({ t, ctx, onFullSaturday }: { t: Tutorial; ctx: Pane
           ))}
         </ul>
       )}
+      {!lesson.optional && checks.length === 1 && checks[0].done && (
+        <p className="lesson-ready" role="status">
+          ✓ {checks[0].label}. Run when ready.
+        </p>
+      )}
       {focus.priceDept ? (
         <PriceComparison state={t.start} plan={t.draft} onChange={ctx.onPlanChange} d={focus.priceDept} steps={lesson.steps} />
-      ) : ctx.context ? (
-        <ContextCard state={t.start} plan={t.draft} onChange={ctx.onPlanChange} zone={ctx.context} onClose={() => ctx.setContext(null)} opts={opts} onOpen={ctx.setContext} />
-      ) : (
-        <OutlookPanel state={t.start} plan={t.draft} steps={lesson.steps} onOpen={ctx.setContext} />
-      )}
-      <StaffList state={t.start} plan={t.draft} onChange={ctx.onPlanChange} selected={ctx.selected} onSelect={ctx.setSelected} highlight={focus.staff} />
-      <RunBar errors={errors} onRun={t.runNow} label={`Run ${intervalLabel(lesson.steps)} ▶`} />
+      ) : sel?.kind === 'staff' ? (
+        <StaffCard state={t.start} plan={t.draft} onChange={ctx.onPlanChange} id={sel.id} onClose={() => ctx.setSel(null)} />
+      ) : sel?.kind === 'zone' ? (
+        <ContextCard state={t.start} plan={t.draft} onChange={ctx.onPlanChange} zone={sel.zone} onClose={() => ctx.setSel(null)} opts={opts} onOpen={(z) => ctx.setSel({ kind: 'zone', zone: z })} />
+      ) : null}
       <button type="button" className="btn-link lesson-skip" onClick={t.skipLesson}>
         Skip this lesson
       </button>

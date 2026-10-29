@@ -28,22 +28,31 @@ export function OutcomeList({ report, max = 3 }: { report: HourReport; max?: num
   );
 }
 
-export function ResultsPanel({ report, onContinue, last }: { report: HourReport; onContinue: () => void; last: boolean }) {
+/** Brief summary of the interval just played; details on request. */
+export function SummaryCard({ report, onDismiss }: { report: HourReport; onDismiss?: () => void }) {
   const [details, setDetails] = useState(false);
   const notes = explainHour(report);
   const m = report.money;
   const profit = m.revenue - m.cogs - m.waste - m.wages - m.extras;
   return (
-    <div className="panel-inner">
-      <section className="hour-head">
-        <h2>{intervalRange(report)}: what happened</h2>
-      </section>
+    <div className="panel-inner summary">
+      <div className="panel-head">
+        <div>
+          <p className="panel-kicker">What happened</p>
+          <h2>{intervalRange(report)}</h2>
+        </div>
+        {onDismiss && (
+          <button type="button" className="panel-x" onClick={onDismiss} aria-label="Dismiss summary">
+            ✕
+          </button>
+        )}
+      </div>
       <OutcomeList report={report} />
-      <p className="tiny muted">
-        Takings {money(m.revenue)} · profit this hour {money(profit)} · customer mood {Math.round(report.satisfaction.score)}
+      <p className="summary-money">
+        Takings {money(m.revenue)} · profit this hour {money(profit)}
       </p>
       <button type="button" className="btn-link" aria-expanded={details} onClick={() => setDetails((d) => !d)}>
-        {details ? 'Hide details' : 'Details'}
+        {details ? 'Hide details' : 'View details'}
       </button>
       {details && (
         <div className="details-body">
@@ -127,16 +136,11 @@ export function ResultsPanel({ report, onContinue, last }: { report: HourReport;
           </table>
         </div>
       )}
-      <div className="run-bar">
-        <button type="button" className="btn-primary btn-run" onClick={onContinue} autoFocus>
-          {last ? 'Close up and count the takings ▶' : `Plan ${hourLabel(report.hour + 1)} ▶`}
-        </button>
-      </div>
     </div>
   );
 }
 
-export function ReplayPanel({ report, step, onSkip }: { report: HourReport; step: number; onSkip: () => void }) {
+export function ReplayPanel({ report, step }: { report: HourReport; step: number }) {
   const steps = report.steps;
   const s = steps[Math.min(step, steps.length - 1)];
   const absStep = report.fromStep + Math.min(step, steps.length - 1) + 1;
@@ -145,18 +149,20 @@ export function ReplayPanel({ report, step, onSkip }: { report: HourReport; step
   const left = steps.slice(0, step + 1).reduce((t, x) => t + x.abandoned, 0);
   return (
     <div className="panel-inner">
-      <section className="hour-head">
-        <p className="live-badge">Recorded result · playing back</p>
-        <p className="replay-clock" aria-live="polite">
-          {hourLabel(report.hour).slice(0, 2)}:{mins === '60' ? '59' : mins}
-        </p>
-      </section>
+      <div className="panel-head">
+        <div>
+          <p className="panel-kicker">Replay · already decided</p>
+          <h2 aria-live="polite">
+            {hourLabel(report.hour).slice(0, 2)}:{mins === '60' ? '59' : mins}
+          </h2>
+        </div>
+      </div>
       <ul className="replay-facts">
         <li>Paid so far: {Math.round(served)}</li>
         <li>Queue: {Math.round(s?.queue ?? 0)}</li>
         <li className={left >= 1 ? 'bad' : ''}>Gave up: {Math.round(left)}</li>
       </ul>
-      <h3>Staff now</h3>
+      <p className="picker-title">Staff now</p>
       <ul className="activity-list">
         {stepActivity(report, step).map((a) => (
           <li key={a.id} className={a.activity === 'idle' ? 'idle' : ''}>
@@ -165,9 +171,6 @@ export function ReplayPanel({ report, step, onSkip }: { report: HourReport; step
           </li>
         ))}
       </ul>
-      <button type="button" className="btn-primary" onClick={onSkip} autoFocus>
-        Skip to results
-      </button>
     </div>
   );
 }

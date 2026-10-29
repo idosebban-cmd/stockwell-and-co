@@ -77,10 +77,12 @@ export function useGame() {
     setRecord(next);
     setLastReport(re.reports[re.reports.length - 1] ?? null);
     setDraft(null);
-    setPhase(settings.skipReplay ? 'results' : 'replay');
+    // After the last hour the result stays up before closing; otherwise planning resumes with a dismissible summary.
+    const after = re.state && re.state.hour >= CONFIG.hours ? 'results' : 'plan';
+    setPhase(settings.skipReplay ? after : 'replay');
   }, [state, draft, record, settings.skipReplay]);
 
-  const finishReplay = useCallback(() => setPhase('results'), []);
+  const finishReplay = useCallback(() => setPhase(state && state.hour >= CONFIG.hours ? 'results' : 'plan'), [state]);
 
   const continueAfterResults = useCallback(() => {
     if (state && state.hour >= CONFIG.hours) setPhase('closed');

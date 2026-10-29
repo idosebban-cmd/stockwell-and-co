@@ -8,7 +8,7 @@ import { runHour, startDay } from './engine';
 import type { HourPlan, HourReport, SetupPlan, SimState } from './types';
 
 /** Version 2 added the chilled shelf-life choice; version 1 saves are discarded. */
-export const RECORD_VERSION = 2;
+export const RECORD_VERSION = 3;
 
 export interface GameRecord {
   version: number;

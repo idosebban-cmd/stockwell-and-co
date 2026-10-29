@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "balance": "vite-node scripts/balance.ts",
-    "consequence": "vite-node scripts/consequence.ts"
+    "consequence": "vite-node scripts/consequence.ts",
+    "pricing": "vite-node scripts/pricing.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

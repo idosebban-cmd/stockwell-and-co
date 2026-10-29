@@ -91,6 +91,8 @@ interface Props {
   jobHints?: Partial<Record<ZoneId, JobHint>>;
   /** Places with a problem worth opening. */
   problemZones?: Partial<Record<ZoneId, 'urgent' | 'warn'>>;
+  /** The place whose panel is open: its counts are shown in the shop. */
+  detail?: ZoneId | null;
 }
 
 const W = 1000;
@@ -125,13 +127,13 @@ const SLOTS: Record<AssignmentId, [number, number][]> = {
   ],
 };
 
-const ZONES: { z: ZoneId; x: number; y: number; w: number; h: number; badge: [number, number] }[] = [
-  { z: 'produce', x: 12, y: 156, w: 268, h: 278, badge: [226, 384] },
-  { z: 'chilled', x: 300, y: 156, w: 688, h: 114, badge: [936, 158] },
-  { z: 'ambient', x: 316, y: 272, w: 672, h: 160, badge: [936, 414] },
-  { z: 'tills', x: 316, y: 466, w: 672, h: 224, badge: [806, 440] },
-  { z: 'dock', x: 396, y: 12, w: 180, h: 134, badge: [524, 16] },
-  { z: 'break', x: 704, y: 12, w: 284, h: 134, badge: [936, 16] },
+const ZONES: { z: ZoneId; x: number; y: number; w: number; h: number; mark: [number, number] }[] = [
+  { z: 'produce', x: 12, y: 156, w: 268, h: 278, mark: [262, 170] },
+  { z: 'chilled', x: 300, y: 156, w: 688, h: 114, mark: [970, 172] },
+  { z: 'ambient', x: 316, y: 272, w: 672, h: 160, mark: [970, 288] },
+  { z: 'tills', x: 316, y: 466, w: 672, h: 224, mark: [970, 482] },
+  { z: 'dock', x: 396, y: 12, w: 180, h: 134, mark: [560, 28] },
+  { z: 'break', x: 704, y: 12, w: 284, h: 134, mark: [970, 28] },
 ];
 
 /** Where each placed employee stands (viewBox units), for tips that point at someone. */
@@ -169,6 +171,7 @@ function StoreImpl(props: Props) {
   const highlightStaff = props.highlightStaff ?? [];
   const hints = props.jobHints ?? {};
   const problemZones = props.problemZones ?? {};
+  const detail = props.detail ?? null;
   const counts = new Map<AssignmentId, number>();
   const placed: { s: StaffMember; a: AssignmentId; x: number; y: number }[] = [];
   for (const s of staff) {
@@ -215,15 +218,15 @@ function StoreImpl(props: Props) {
       <Walkways />
       <BackWalls />
 
-      <Stockroom backroom={view.backroom} />
-      <Dock dock={view.dock} lorry={view.lorry} />
+      <Stockroom backroom={view.backroom} detail={detail} />
+      <Dock dock={view.dock} lorry={view.lorry} detail={detail === 'dock'} />
       <Office clock={view.clock} />
       <BreakRoom />
 
-      <Produce view={view} />
-      <Chilled view={view} />
-      <Groceries view={view} />
-      <Checkouts open={openTills} queue={view.queue} />
+      <Produce view={view} detail={detail === 'produce'} />
+      <Chilled view={view} detail={detail === 'chilled'} />
+      <Groceries view={view} detail={detail === 'ambient'} />
+      <Checkouts open={openTills} queue={view.queue} detail={detail === 'tills'} />
       <Entrance dropped={view.dropped} />
 
       {/* Zones: select a department, or place the selected employee */}
@@ -234,7 +237,7 @@ function StoreImpl(props: Props) {
         const full = n >= lim;
         const hint = selected ? hints[zone.z] : undefined;
         const label = selected
-          ? `${ASSIGNMENT_LABEL[a]}: move ${selectedName} here (${n} of ${lim})${full ? ', full' : ''}${hint ? `. ${hint.text}` : ''}`
+          ? `${ASSIGNMENT_LABEL[a]}: move ${selectedName} here (${n} of ${lim} staff)${full ? ', full' : ''}${hint ? `. ${hint.text}` : ''}`
           : `${ZONE_NAME[zone.z]}: ${n} of ${lim} staff${problemZones[zone.z] ? ', needs attention' : ''}. Open.`;
         const activate = () => {
           if (!interactive) return;
@@ -262,13 +265,25 @@ function StoreImpl(props: Props) {
                 }
               }}
             />
-            <ZoneBadge x={zone.badge[0]} y={zone.badge[1]} n={n} lim={lim} />
-            {problemZones[zone.z] && !selected && <ProblemMark x={zone.badge[0] - 14} y={zone.badge[1] + 9} level={problemZones[zone.z]!} />}
+            {selected && interactive && hint && <ZoneBadge x={zone.mark[0] - 46} y={zone.mark[1] - 9} n={n} lim={lim} />}
           </g>
         );
       })}
 
       <Notices notices={view.notices} onOpen={interactive ? (z) => onContext(z) : undefined} />
+      {!selected &&
+        ZONES.map((zone) =>
+          problemZones[zone.z] ? (
+            <ProblemMark
+              key={`pm-${zone.z}`}
+              x={zone.mark[0]}
+              y={zone.mark[1]}
+              level={problemZones[zone.z]!}
+              label={ZONE_NAME[zone.z]}
+              onOpen={interactive ? () => onContext(zone.z) : undefined}
+            />
+          ) : null,
+        )}
       <QueueFigures open={openTills} queue={view.queue} />
       <AisleShoppers view={view} motion={motion} />
       <WalkOuts view={view} motion={motion} />
@@ -292,6 +307,7 @@ function StoreImpl(props: Props) {
           selected={selected === s.id}
           interactive={interactive}
           onClick={() => onSelectStaff(s.id)}
+          named={selected === s.id || highlightStaff.includes(s.id)}
         />
       ))}
     </svg>
@@ -366,7 +382,7 @@ function RoomLabel({ x, y, children }: { x: number; y: number; children: ReactNo
   );
 }
 
-function Stockroom({ backroom }: { backroom: Record<DeptId, number> }) {
+function Stockroom({ backroom, detail }: { backroom: Record<DeptId, number>; detail: ZoneId | null }) {
   const bays: [DeptId, number, string][] = [
     ['produce', 22, 'Fruit & veg'],
     ['chilled', 144, 'Cold room'],
@@ -389,8 +405,9 @@ function Stockroom({ backroom }: { backroom: Record<DeptId, number> }) {
               const shelf = Math.floor(i / 4);
               return <rect key={i} x={x + 4 + (i % 4) * 25} y={98 - shelf * 28} width="22" height="20" rx="2" className={`crate crate-${d}`} />;
             })}
-            <text x={x + 53} y="138" textAnchor="middle" fontSize="11" fill={backroom[d] < 1 ? 'var(--bad)' : 'var(--ink)'} fontWeight={backroom[d] < 1 ? 700 : 400}>
-              {label}: {backroom[d] < 1 ? 'none' : Math.round(backroom[d])}
+            <text x={x + 53} y="138" textAnchor="middle" fontSize="11" fill={backroom[d] < 1 ? 'var(--bad)' : 'var(--muted)'} fontWeight={backroom[d] < 1 || detail === d || detail === 'dock' ? 700 : 400}>
+              {label}
+              {backroom[d] < 1 ? ': none' : detail === d || detail === 'dock' ? `: ${Math.round(backroom[d])}` : ''}
             </text>
           </g>
         );
@@ -399,12 +416,12 @@ function Stockroom({ backroom }: { backroom: Record<DeptId, number> }) {
   );
 }
 
-function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
+function Dock({ dock, lorry, detail }: { dock: number; lorry: boolean; detail: boolean }) {
   const n = Math.min(10, Math.ceil(dock / 120));
   return (
     <g aria-hidden="true">
       <RoomLabel x={404} y={26}>
-        {dock > 0 ? `DOCK · ${Math.round(dock).toLocaleString('en-GB')}` : 'DOCK'}
+        {dock > 0 && detail ? `DOCK · ${Math.round(dock).toLocaleString('en-GB')}` : 'DOCK'}
       </RoomLabel>
       <rect x="434" y="8" width="112" height="9" fill="var(--mustard)" />
       <path d="M440 8 l6 9 M456 8 l6 9 M472 8 l6 9 M488 8 l6 9 M504 8 l6 9 M520 8 l6 9 M536 8 l6 9" stroke="var(--ink)" strokeWidth="2" opacity="0.4" />
@@ -422,7 +439,7 @@ function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
           <path d={`M${404 + (i % 5) * 34} ${(i < 5 ? 100 : 76) + 11} h30`} stroke="rgba(0,0,0,0.2)" />
         </g>
       ))}
-      {dock < 1 && (
+      {dock < 1 && detail && (
         <text x="486" y="140" textAnchor="middle" fontSize="11" fill="var(--muted)">
           Nothing waiting
         </text>
@@ -442,9 +459,6 @@ function Office({ clock }: { clock: string }) {
         {clock}
       </text>
       <rect x="600" y="112" width="80" height="16" rx="2" fill="var(--wood)" />
-      <text x="640" y="140" textAnchor="middle" fontSize="9" fill="var(--muted)">
-        (mostly biscuits)
-      </text>
     </g>
   );
 }
@@ -468,33 +482,33 @@ function BreakRoom() {
         ROTA
       </text>
       <path d="M918 88 h50 M918 96 h50 M918 104 h40 M918 112 h46" stroke="var(--line-strong)" strokeWidth="1.5" />
-      <text x="806" y="62" textAnchor="middle" fontSize="8" fill="var(--muted)" fontStyle="italic">
-        Please wash your mug, Gary
-      </text>
     </g>
   );
 }
 
-function Level({ x, y, w, units, cap, label, tag }: { x: number; y: number; w: number; units: number; cap: number; label: string; tag?: string }) {
+/** Department name, with a small Low/Empty indicator; the count only while its panel is open. */
+function Level({ x, y, units, cap, label, tag, detail }: { x: number; y: number; w?: number; units: number; cap: number; label: string; tag?: string; detail: boolean }) {
   const f = Math.max(0, Math.min(1, units / Math.max(1, cap)));
   const word = fillWord(f);
   const low = word === 'Empty' || word === 'Low';
+  const text = `${label}${tag ? ` · ${tag}` : ''}`;
+  const tw = text.length * 6.4 + 14;
+  const extra = detail ? `${Math.round(units)} / ${Math.round(cap)}` : low ? word : '';
+  const ew = extra.length * 6.6 + 14;
   return (
     <g aria-hidden="true">
-      <rect x={x} y={y} width={w} height="22" rx="6" fill="var(--paper)" stroke={low ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth={low ? 2 : 1} />
-      <rect x={x + 3} y={y + 16} width={(w - 6) * f} height="3.5" rx="1.5" fill={low ? 'var(--bad)' : 'var(--good)'} />
-      <text x={x + 7} y={y + 12.5} fontSize="11" fill="var(--burgundy-dark)" fontWeight="800">
-        {label}
-        {tag && (
-          <tspan fill="var(--burgundy)" fontWeight="700">
-            {' '}
-            · {tag}
-          </tspan>
-        )}
+      <rect x={x} y={y} width={tw} height="20" rx="6" fill="var(--paper)" opacity="0.92" />
+      <text x={x + 7} y={y + 14} fontSize="11" fill="var(--burgundy-dark)" fontWeight="800">
+        {text}
       </text>
-      <text x={x + w - 7} y={y + 12.5} fontSize="11" textAnchor="end" fill={low ? 'var(--bad)' : 'var(--muted)'} fontWeight="700">
-        {word === 'Empty' ? '⚠ EMPTY' : `${word} · ${Math.round(units)}`}
-      </text>
+      {extra && (
+        <g>
+          <rect x={x + tw + 4} y={y + 1} width={ew} height="18" rx="9" fill={low ? 'var(--bad)' : 'var(--paper)'} stroke={low ? 'none' : 'var(--line-strong)'} />
+          <text x={x + tw + 4 + ew / 2} y={y + 14} textAnchor="middle" fontSize="11" fontWeight="800" fill={low ? '#fff' : 'var(--ink)'}>
+            {extra}
+          </text>
+        </g>
+      )}
     </g>
   );
 }
@@ -515,7 +529,7 @@ function Sticker({ x, y }: { x: number; y: number }) {
   );
 }
 
-function Produce({ view }: { view: StoreView }) {
+function Produce({ view, detail }: { view: StoreView; detail: boolean }) {
   const f = view.shelf.produce / Math.max(1, view.shelfCap.produce);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 15);
   const crates: [number, number, string][] = [
@@ -539,13 +553,12 @@ function Produce({ view }: { view: StoreView }) {
           {view.markdown.includes('produce') && c === 0 && <Sticker x={x + 98} y={y + 8} />}
         </g>
       ))}
-      <Level x={20} y={158} w={256} units={view.shelf.produce} cap={view.shelfCap.produce} label="Fruit & veg" tag={tagFor(view, 'produce')} />
-      {view.emptyDepts.includes('produce') && <EmptyFlag x={145} y={290} />}
+      <Level x={20} y={160} units={view.shelf.produce} cap={view.shelfCap.produce} label="Fruit & veg" tag={tagFor(view, 'produce')} detail={detail} />
     </g>
   );
 }
 
-function Chilled({ view }: { view: StoreView }) {
+function Chilled({ view, detail }: { view: StoreView; detail: boolean }) {
   const working = view.fridgeFault ? 2 : 4;
   const f = view.shelf.chilled / Math.max(1, view.shelfCap.chilled);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 24);
@@ -570,27 +583,18 @@ function Chilled({ view }: { view: StoreView }) {
       {view.fridgeFault && (
         <g>
           <rect x="648" y="180" width="336" height="52" fill="url(#hatch)" />
-          <rect x="730" y="194" width="172" height="22" rx="6" fill="var(--bad)" />
-          <text x="816" y="209" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="700">
-            ⚠ CHILLER FAULT
+          <rect x="756" y="196" width="120" height="20" rx="6" fill="var(--paper)" opacity="0.92" />
+          <text x="816" y="210" textAnchor="middle" fontSize="11" fill="var(--bad)" fontWeight="800">
+            Out of use
           </text>
         </g>
       )}
-      <Level
-        x={306}
-        y={156}
-        w={330}
-        units={view.shelf.chilled}
-        cap={view.shelfCap.chilled}
-        label={view.fridgeFault ? 'Chilled (half out of use)' : 'Chilled'}
-        tag={tagFor(view, 'chilled')}
-      />
-      {view.emptyDepts.includes('chilled') && <EmptyFlag x={470} y={208} />}
+      <Level x={306} y={158} units={view.shelf.chilled} cap={view.shelfCap.chilled} label="Chilled" tag={tagFor(view, 'chilled')} detail={detail} />
     </g>
   );
 }
 
-function Groceries({ view }: { view: StoreView }) {
+function Groceries({ view, detail }: { view: StoreView; detail: boolean }) {
   const f = view.shelf.ambient / Math.max(1, view.shelfCap.ambient);
   const per = Math.round(Math.max(0, Math.min(1, f)) * 34);
   const gondolas = [286, 340, 394];
@@ -611,24 +615,12 @@ function Groceries({ view }: { view: StoreView }) {
           <rect x="952" y={y - 2} width="12" height="28" rx="2" fill={promo ? 'var(--mustard)' : 'var(--wood)'} />
         </g>
       ))}
-      <Level x={330} y={242} w={300} units={view.shelf.ambient} cap={view.shelfCap.ambient} label="Cupboard essentials" tag={tagFor(view, 'ambient')} />
-      {view.emptyDepts.includes('ambient') && <EmptyFlag x={650} y={350} />}
+      <Level x={330} y={244} units={view.shelf.ambient} cap={view.shelfCap.ambient} label="Cupboard essentials" tag={tagFor(view, 'ambient')} detail={detail} />
     </g>
   );
 }
 
-function EmptyFlag({ x, y }: { x: number; y: number }) {
-  return (
-    <g>
-      <rect x={x - 54} y={y - 13} width="108" height="22" rx="11" fill="var(--bad)" />
-      <text x={x} y={y + 2} textAnchor="middle" fontSize="11" fill="#fff" fontWeight="700">
-        SHELF EMPTY
-      </text>
-    </g>
-  );
-}
-
-function Checkouts({ open, queue }: { open: number; queue: number }) {
+function Checkouts({ open, queue, detail }: { open: number; queue: number; detail: boolean }) {
   return (
     <g aria-hidden="true">
       {LANE_Y.map((y, i) => {
@@ -645,21 +637,22 @@ function Checkouts({ open, queue }: { open: number; queue: number }) {
               {i + 1}
             </text>
             {!on && (
-              <g>
-                <path d={`M790 ${y + 26} v26`} stroke="var(--burgundy)" strokeWidth="3" />
-                <rect x="744" y={y + 28} width="68" height="16" rx="3" fill="var(--paper)" stroke="var(--burgundy)" />
-                <text x="778" y={y + 40} textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--burgundy)">
-                  TILL CLOSED
-                </text>
-              </g>
+              <text x="778" y={y + 40} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--muted)">
+                Closed
+              </text>
             )}
           </g>
         );
       })}
-      <rect x="860" y="436" width="126" height="28" rx="7" fill="var(--paper)" stroke={queue > 10 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="2" />
-      <text x="923" y="454" textAnchor="middle" fontSize="12" fontWeight="700" fill={queue > 10 ? 'var(--bad)' : 'var(--ink)'}>
-        {queue > 10 ? '⚠ ' : ''}Queue {Math.round(queue)} · {open}/3 open
-      </text>
+      {(detail || queue >= 8) && (
+        <g>
+          <rect x="828" y="438" width="120" height="22" rx="7" fill="var(--paper)" stroke={queue >= 8 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="1.5" />
+          <text x="888" y="453.5" textAnchor="middle" fontSize="11.5" fontWeight="800" fill={queue >= 8 ? 'var(--bad)' : 'var(--ink)'}>
+            Queue {Math.round(queue)}
+            {detail ? ` · ${open}/3 open` : ''}
+          </text>
+        </g>
+      )}
     </g>
   );
 }
@@ -671,9 +664,6 @@ function Entrance({ dropped }: { dropped: number }) {
       <rect x="66" y="644" width="130" height="34" rx="4" fill="var(--burgundy)" />
       <text x="131" y="666" textAnchor="middle" fontSize="12" fill="var(--paper)" fontWeight="700" letterSpacing="1">
         WAY IN · WAY OUT
-      </text>
-      <text x="131" y="636" textAnchor="middle" fontSize="9" fill="var(--muted)">
-        Please mind the step. It is famous.
       </text>
       {[0, 1, 2, 3].map((i) => (
         <rect key={i} x="226" y={644 - i * 4} width="22" height="12" rx="2" fill="var(--burgundy)" opacity={0.7 + i * 0.08} stroke="var(--paper)" strokeWidth="0.8" />
@@ -805,9 +795,27 @@ function HintPill({ zone, hint }: { zone: (typeof ZONES)[number]; hint: JobHint 
   );
 }
 
-function ProblemMark({ x, y, level }: { x: number; y: number; level: 'urgent' | 'warn' }) {
+function ProblemMark({ x, y, level, label, onOpen }: { x: number; y: number; level: 'urgent' | 'warn'; label: string; onOpen?: () => void }) {
   return (
-    <g aria-hidden="true" pointerEvents="none" className={level === 'urgent' ? 'problem-mark urgent' : 'problem-mark'}>
+    <g
+      className={`${level === 'urgent' ? 'problem-mark urgent' : 'problem-mark'} ${onOpen ? 'notice-open' : ''}`}
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-label={onOpen ? `${label} needs attention. Open.` : undefined}
+      aria-hidden={onOpen ? undefined : true}
+      onClick={onOpen}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpen();
+              }
+            }
+          : undefined
+      }
+    >
+      <circle cx={x} cy={y} r="14" fill="transparent" />
       <circle cx={x} cy={y} r="10" fill={level === 'urgent' ? 'var(--bad)' : 'var(--mustard)'} stroke="var(--paper)" strokeWidth="2" />
       <text x={x} y={y + 4.5} textAnchor="middle" fontSize="13" fontWeight="900" fill={level === 'urgent' ? '#fff' : 'var(--burgundy-dark)'}>
         !
@@ -887,8 +895,10 @@ function StaffToken({
   interactive,
   onClick,
   lesson,
+  named,
 }: {
   lesson?: boolean;
+  named?: boolean;
   s: StaffMember;
   a: AssignmentId;
   x: number;
@@ -905,8 +915,12 @@ function StaffToken({
   const barColour = e < CONFIG.staff.exhaustedBelow ? 'var(--bad)' : e < CONFIG.staff.tiredBelow ? 'var(--mustard)' : 'var(--good)';
   return (
     <g
-      className={`token ${selected ? 'token-selected' : ''}`}
+      className={`token ${selected ? 'token-selected' : ''} ${interactive ? 'token-interactive' : ''}`}
       transform={`translate(${x} ${y})`}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-pressed={interactive ? selected : undefined}
+      aria-label={interactive ? `${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ', tired' : ''}. Select.` : undefined}
       onClick={
         interactive
           ? (ev) => {
@@ -915,7 +929,18 @@ function StaffToken({
             }
           : undefined
       }
+      onKeyDown={
+        interactive
+          ? (ev) => {
+              if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
     >
+      <circle cx="0" cy="-30" r="30" fill="transparent" />
       <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
       {lesson && !selected && <circle cx="0" cy="-30" r="38" className="lesson-ring" />}
       {selected && <ellipse cx="0" cy="0" rx="22" ry="7" fill="none" stroke="var(--mustard)" strokeWidth="4" />}
@@ -926,14 +951,20 @@ function StaffToken({
       </g>
       {act === 'idle' && a !== 'break' && <Bubble text="…" />}
       {tired && act !== 'idle' && a !== 'break' && <Bubble text="z" tone="tired" />}
-      <g transform="translate(0 4)">
-        <rect x="-25" y="0" width="50" height="17" rx="5" fill="var(--paper)" stroke={selected ? 'var(--mustard)' : 'var(--line-strong)'} strokeWidth={selected ? 2 : 1} />
-        <text y="10" textAnchor="middle" fontSize="9.5" fill="var(--ink)" fontWeight="800">
-          {name}
-        </text>
-        <rect x="-20" y="12.5" width="40" height="2.6" rx="1.3" fill="var(--line)" />
-        <rect x="-20" y="12.5" width={(40 * e) / 100} height="2.6" rx="1.3" fill={barColour} />
-      </g>
+      {named && (
+        <g transform="translate(0 4)">
+          <rect x="-30" y="0" width="60" height="20" rx="6" fill={selected ? 'var(--mustard)' : 'var(--paper)'} stroke={selected ? 'var(--burgundy-dark)' : 'var(--line-strong)'} strokeWidth={selected ? 1.5 : 1} />
+          <text y="11" textAnchor="middle" fontSize="11" fill="var(--ink)" fontWeight="800">
+            {name}
+          </text>
+          {selected && (
+            <>
+              <rect x="-24" y="14.5" width="48" height="3" rx="1.5" fill="var(--paper)" />
+              <rect x="-24" y="14.5" width={(48 * e) / 100} height="3" rx="1.5" fill={barColour} />
+            </>
+          )}
+        </g>
+      )}
     </g>
   );
 }

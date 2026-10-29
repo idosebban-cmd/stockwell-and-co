@@ -255,9 +255,9 @@ export function priceTradeOff(_state: SimState, opts: PriceOption[], tier: Price
   const net = o.grossProfit - o.waste - (reg.grossProfit - reg.waste);
   const parts = [`${Math.abs(items)} ${items >= 0 ? 'more' : 'fewer'} sold than at the regular price`];
   const wasteDiff = o.waste - reg.waste;
-  if (Math.abs(wasteDiff) >= 1) parts.push(`${money(Math.abs(wasteDiff))} ${wasteDiff < 0 ? 'less' : 'more'} binned`);
+  if (Math.abs(wasteDiff) >= 1) parts.push(`£${Math.round(Math.abs(wasteDiff))} ${wasteDiff < 0 ? 'less' : 'more'} binned`);
   if (o.walkouts - reg.walkouts >= 1) parts.push(`${Math.round(o.walkouts - reg.walkouts)} more walk-outs`);
-  parts.push(`gross profit after waste ${net >= 0 ? '+' : '−'}${money(Math.abs(net))}`);
+  parts.push(`gross profit after waste ${net >= 0 ? '+' : '−'}£${Math.round(Math.abs(net))}`);
   return parts.join('; ') + '.';
 }
 
