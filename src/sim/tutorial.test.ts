@@ -69,11 +69,11 @@ describe('guided shift', () => {
       const d = l.focus(s, lessonPlan(s)).priceDept!;
       const opts = priceOptions(s, lessonPlan(s), d, l.steps);
       const by = Object.fromEntries(opts.map((o) => [o.tier, o]));
-      expect(by.value.sold).toBeGreaterThanOrEqual(by.premium.sold);
-      expect(by.value.wanted).toBeGreaterThan(by.premium.wanted);
+      expect(by.low.sold).toBeGreaterThanOrEqual(by.high.sold);
+      expect(by.low.wanted).toBeGreaterThan(by.high.wanted);
       for (const o of opts) expect(o.grossProfit).toBeLessThan(o.revenue);
-      const lessonRun = runLesson(l, s, { ...lessonPlan(s), pricing: { ...s.pricing, [d]: 'premium' } });
-      expect(lessonRun.result.figures.find((f) => f.label === 'Sold')!.value).toBe(String(Math.round(by.premium.sold)));
+      const lessonRun = runLesson(l, s, { ...lessonPlan(s), pricing: { ...s.pricing, [d]: 'high' } });
+      expect(lessonRun.result.figures.find((f) => f.label === 'Sold')!.value).toBe(String(Math.round(by.high.sold)));
     }
   });
 });
@@ -133,11 +133,56 @@ describe('insight', () => {
     const l = lesson('price-surplus');
     const s = l.build();
     const opts = priceOptions(s, lessonPlan(s), 'chilled', l.steps);
-    for (const t of ['value', 'standard', 'premium'] as const) expect(priceTradeOff(s, opts, t, 'chilled')).not.toMatch(/best|should|recommend/i);
+    for (const t of ['low', 'regular', 'high'] as const) expect(priceTradeOff(s, opts, t, 'chilled')).not.toMatch(/best|should|recommend/i);
   });
   it('the full Saturday still works with every department', () => {
     let s = startDay(1, recommendedSetup());
     s = runHour(s, defaultPlan(s)).state;
     for (const d of DEPTS) expect(priceOptions(s, defaultPlan(s), d)).toHaveLength(3);
+  });
+});
+
+describe('pricing economics', () => {
+  const after = (o: { grossProfit: number; waste: number }) => o.grossProfit - o.waste;
+  it('scarce stock: every price sells out, so the high price earns the most', () => {
+    const l = lesson('price-scarce');
+    const s = l.build();
+    const opts = priceOptions(s, lessonPlan(s), 'produce', l.steps);
+    const by = Object.fromEntries(opts.map((o) => [o.tier, o]));
+    expect(Math.abs(by.low.sold - by.high.sold)).toBeLessThan(2);
+    expect(by.high.grossProfit).toBeGreaterThan(by.regular.grossProfit);
+    expect(by.regular.grossProfit).toBeGreaterThan(by.low.grossProfit);
+    expect(priceTradeOff(s, opts, 'high', 'produce')).toBe('All prices are expected to sell out; High price earns more per item.');
+  });
+  it('surplus near expiry: the low price sells enough more to earn the most after waste', () => {
+    const l = lesson('price-surplus');
+    const s = l.build();
+    const opts = priceOptions(s, lessonPlan(s), 'chilled', l.steps);
+    const by = Object.fromEntries(opts.map((o) => [o.tier, o]));
+    expect(by.low.sold).toBeGreaterThan(by.regular.sold);
+    expect(by.low.waste).toBeLessThan(by.regular.waste);
+    expect(after(by.low)).toBeGreaterThan(after(by.regular));
+    expect(after(by.regular)).toBeGreaterThan(after(by.high));
+  });
+  it('no price wins every situation', () => {
+    // Ordinary day: the regular price earns most on fruit & veg over the remaining day.
+    let s = startDay(1, recommendedSetup());
+    while (s.hour < 2) s = runHour(s, sensible(s)).state;
+    const day = priceOptions(s, sensible(s), 'produce');
+    const best = (os: typeof day) => [...os].sort((a, b) => after(b) - after(a))[0].tier;
+    expect(best(day)).toBe('regular');
+    const scarce = lesson('price-scarce');
+    const ss = scarce.build();
+    expect(best(priceOptions(ss, lessonPlan(ss), 'produce', scarce.steps))).toBe('high');
+    const surplus = lesson('price-surplus');
+    const su = surplus.build();
+    expect(best(priceOptions(su, lessonPlan(su), 'chilled', surplus.steps))).toBe('low');
+  });
+  it('fuller baskets take longer at the tills', () => {
+    let s = startDay(1, recommendedSetup());
+    s = runHour(s, sensible(s)).state;
+    const plan = sensible(s);
+    const at = (t: 'low' | 'high') => runHour(s, { ...plan, pricing: { produce: t, chilled: t, ambient: t } }, { forecastOnly: true }).report.tillCapacity;
+    expect(at('low')).toBeLessThan(at('high'));
   });
 });

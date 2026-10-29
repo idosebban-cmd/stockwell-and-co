@@ -42,7 +42,7 @@ export function recommendedSetup(): SetupPlan {
       ambient: { ...o.ambient },
     },
     chilledLife: { ...C.openingOrder.recommendedChilledLife },
-    pricing: { produce: 'standard', chilled: 'standard', ambient: 'standard' },
+    pricing: { produce: 'regular', chilled: 'regular', ambient: 'regular' },
   };
 }
 
@@ -71,7 +71,7 @@ export interface MiddayRoom {
 export function middayRoomEstimate(setup: SetupPlan, forecast: readonly number[], dept: DeptId): MiddayRoom {
   const cfg = C.departments[dept];
   let sales = 0;
-  for (let h = 0; h < C.openingOrder.middayHour; h++) sales += forecast[h] * cfg.basket * C.pricing[setup.pricing[dept]].demandMult;
+  for (let h = 0; h < C.openingOrder.middayHour; h++) sales += forecast[h] * cfg.basket * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
   const opening = carriedQty(dept) + Math.max(0, Math.round(setup.orders[dept].morning));
   const expectedLeft = Math.max(0, opening - sales);
   const room = Math.max(0, cfg.shelfCapacity + cfg.backroomCapacity - expectedLeft);
@@ -79,7 +79,7 @@ export function middayRoomEstimate(setup: SetupPlan, forecast: readonly number[]
   let clearsBy: number | null = overflow > 0 ? null : C.openingOrder.middayHour;
   let later = 0;
   for (let h = C.openingOrder.middayHour; h < C.hours && clearsBy === null; h++) {
-    later += forecast[h] * cfg.basket * C.pricing[setup.pricing[dept]].demandMult;
+    later += forecast[h] * cfg.basket * tierDemand(dept, setup.pricing[dept]) * tripMultiplier(setup.pricing, dept);
     if (later >= overflow) clearsBy = h + 1;
   }
   return { expectedLeft, room, overflow, clearsBy };
@@ -318,8 +318,25 @@ export function promotionActive(state: SimState, d: DeptId, hour = state.hour): 
   return state.promotions.some((m) => m.dept === d && m.from <= hour && hour < m.to);
 }
 
+/** Items wanted at a price level, relative to the regular price, from the department's elasticity. */
+export function tierDemand(d: DeptId, tier: PriceTier): number {
+  return Math.pow(C.pricing[tier].priceMult, -C.departments[d].priceElasticity);
+}
+
+/** Whole-shop effect of the other departments' prices on this department's basket. */
+export function tripMultiplier(pricing: Record<DeptId, PriceTier>, d: DeptId): number {
+  return DEPTS.reduce((m, e) => (e === d ? m : m * C.pricing[pricing[e]].tripMult), 1);
+}
+
+/** Minutes at the till for a customer with `items` items, relative to an ordinary basket. */
+export function serviceFactor(items: number): number {
+  const K = C.checkout;
+  const ordinary = DEPTS.reduce((t, d) => t + C.departments[d].basket, 0);
+  return (K.serviceFixedMinutes + K.servicePerItemMinutes * items) / (K.serviceFixedMinutes + K.servicePerItemMinutes * ordinary);
+}
+
 export function demandMultiplier(state: SimState, d: DeptId, hour = state.hour, tier: PriceTier = state.pricing[d]): number {
-  let m: number = C.pricing[tier].demandMult;
+  let m: number = tierDemand(d, tier) * tripMultiplier({ ...state.pricing, [d]: tier }, d);
   if (markdownActive(state, d, hour) && shortDatedUnits(state, d) > 0) m *= C.actions.markdown.demandMult;
   if (promotionActive(state, d, hour)) m *= C.actions.promotion.demandMult;
   return Math.min(C.demand.maxDeptMult, m);
@@ -686,12 +703,12 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
   const dept: Record<DeptId, DeptHourReport> = { produce: emptyDeptReport(), chilled: emptyDeptReport(), ambient: emptyDeptReport() };
   const mdOn = perDept((d) => markdownActive(state, d, h));
   const plainMult = perDept((d) => {
-    let m: number = C.pricing[state.pricing[d]].demandMult;
+    let m: number = tierDemand(d, state.pricing[d]) * tripMultiplier(state.pricing, d);
     if (promotionActive(state, d, h)) m *= C.actions.promotion.demandMult;
     return Math.min(C.demand.maxDeptMult, m) * (opts.forecastOnly ? 1 : sc.deptNoise[d][h]);
   });
   const mdMult = perDept((d) => {
-    let m: number = C.pricing[state.pricing[d]].demandMult * C.actions.markdown.demandMult;
+    let m: number = tierDemand(d, state.pricing[d]) * tripMultiplier(state.pricing, d) * C.actions.markdown.demandMult;
     if (promotionActive(state, d, h)) m *= C.actions.promotion.demandMult;
     return Math.min(C.demand.maxDeptMult, m) * (opts.forecastOnly ? 1 : sc.deptNoise[d][h]);
   });
@@ -709,6 +726,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
   let abandoned = 0;
   let waitWeighted = 0;
   let maxQueue = state.queue.customers;
+  let effTillCap = 0;
   const steps: StepSnapshot[] = [];
 
   for (let k = from; k < to; k++) {
@@ -804,13 +822,17 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
     }
 
     // 5. Checkout. Expected wait comes from the backlog plus half this step's arrivals.
+    // Fuller baskets take longer to scan.
     const backlog = state.queue.customers;
     state.queue.customers += arrivals;
     const q = state.queue.customers;
     maxQueue = Math.max(maxQueue, q);
-    const perMinute = tillCap / 60;
+    const items = q > 1e-6 ? DEPTS.reduce((t, d) => t + S.total(state.queue.baskets[d]), 0) / q : 0;
+    const effCap = tillCap / serviceFactor(items);
+    effTillCap += effCap;
+    const perMinute = effCap / 60;
     const wait = perMinute > 0 ? C.checkout.baseServiceMinutes + (backlog + arrivals / 2) / perMinute : 45;
-    const capStep = tillCap / STEPS;
+    const capStep = effCap / STEPS;
     const s = Math.min(q, capStep);
     if (s > 0 && q > 0) {
       const share = s / q;
@@ -867,7 +889,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       fridgeFault: state.fridge.status === 'fault',
       moved: stepWork.moved,
       received: stepWork.received,
-      tillCapacity: tillCap / STEPS,
+      tillCapacity: capStep,
     });
   }
 
@@ -951,7 +973,8 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
     customersAbandoned: abandoned,
     avgWait,
     maxQueue,
-    tillCapacity: tillCap,
+    // Average customers per hour the tills could serve, given the baskets they actually scanned.
+    tillCapacity: count > 0 ? (effTillCap / count) : tillCap,
     dept,
     staff: staffReports,
     waste,
@@ -1062,9 +1085,9 @@ function hourSatisfaction(
       const b = SC.markdownBonus * share * 3;
       reasons.push({ label: `${deptName(d)} markdown stickers`, delta: b });
       score += b;
-    } else if (tier !== 'standard') {
+    } else if (tier !== 'regular') {
       const b = C.pricing[tier].satisfaction * share * 3;
-      reasons.push({ label: `${C.pricing[tier].label} prices on ${deptName(d).toLowerCase()}`, delta: b });
+      reasons.push({ label: `${C.pricing[tier].label} on ${deptName(d).toLowerCase()}`, delta: b });
       score += b;
     }
     if (promotionActive(state, d, h)) {

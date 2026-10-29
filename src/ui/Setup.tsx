@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CONFIG, DEPTS, PRICE_TIERS, deptName, hourLabel, type ChilledLife, type DeptId, type PriceTier } from '../sim/config';
-import { carriedQty, checkSetup, deliveryUnitCost, money, recommendedSetup } from '../sim/engine';
+import { carriedQty, checkSetup, deliveryUnitCost, money, recommendedSetup, tierDemand } from '../sim/engine';
 import { makeScenario } from '../sim/scenario';
 import type { SetupPlan } from '../sim/types';
 import { Opening } from './Opening';
@@ -155,9 +155,9 @@ function CustomSetup({ seed, onConfirm, onBack }: { seed: number; onConfirm: (s:
               {d === 'chilled' ? '; chilled on the dock spoils' : ''}. Estimate assumes the forecast and full shelves.
             </li>
             <li>
-              Demand today: about {Math.round(scenario.forecast.reduce((t, x) => t + x, 0) * cfg.basket * CONFIG.pricing[setup.pricing[d]].demandMult)} items at{' '}
-              {CONFIG.pricing[setup.pricing[d]].label.toLowerCase()} prices (value +{Math.round((CONFIG.pricing.value.demandMult - 1) * 100)}%, premium −
-              {Math.round((1 - CONFIG.pricing.premium.demandMult) * 100)}%).
+              Demand today: about {Math.round(scenario.forecast.reduce((t, x) => t + x, 0) * cfg.basket * tierDemand(d, setup.pricing[d]))} items at{' '}
+              the {CONFIG.pricing[setup.pricing[d]].label.toLowerCase()} (low price +{Math.round((tierDemand(d, 'low') - 1) * 100)}%, high price −
+              {Math.round((1 - tierDemand(d, 'high')) * 100)}%). Quality is the same at every price.
             </li>
             {d === 'chilled' && <li>“Use by Sunday” stock unsold at 17:00 is binned: the shop is closed on Sundays.</li>}
             {d === 'produce' && <li>Fruit on display bruises slowly, about 1.5% an hour.</li>}

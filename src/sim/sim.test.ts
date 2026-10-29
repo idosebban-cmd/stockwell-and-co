@@ -252,7 +252,7 @@ describe('expiry and perishables', () => {
       return p;
     };
     const setup = recommendedSetup();
-    setup.pricing.produce = 'premium';
+    setup.pricing.produce = 'high';
     let state = startDay(SEED, setup);
     // Reduce produce demand to keep some Friday stock: premium price.
     const has = (s: SimState) => [...s.stock.produce.shelf, ...s.stock.produce.backroom].some((b) => b.label === "Friday's produce");
@@ -391,7 +391,7 @@ describe('interventions', () => {
   it('demand multipliers do not stack without limit', () => {
     let state = startDay(SEED, recommendedSetup());
     const setup = recommendedSetup();
-    setup.pricing.produce = 'value';
+    setup.pricing.produce = 'low';
     state = startDay(SEED, setup);
     const plan = sensible(state);
     plan.actions = [

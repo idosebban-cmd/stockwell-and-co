@@ -5,7 +5,7 @@
  * the same start and progress never depends on a half-played interval.
  */
 import { CONFIG, DEPTS, deptName, type DeptId, type PriceTier } from './config';
-import { deptUnits, recommendedSetup, runSteps, shortDatedUnits, startDay } from './engine';
+import { deptUnits, recommendedSetup, runSteps, startDay } from './engine';
 import { ASSIGNMENT_LABEL } from './roster';
 import { TUTORIAL_SEED } from './scenario';
 import * as S from './stock';
@@ -302,17 +302,17 @@ export const LESSONS: Lesson[] = [
   {
     id: 'price-surplus',
     title: 'Pricing: too much stock',
-    objective: 'Too much short-dated chilled for the time left. Compare prices and choose one.',
+    objective: 'Last hour: more short-dated chilled than shoppers will want. Unsold items are binned at 17:00. Compare prices and choose one.',
     steps: 6,
     optional: true,
     build: () =>
       build({
-        hour: 6,
+        hour: 7,
         staff: { priya: 'tills', bev: 'tills', dougie: 'replenish:chilled' },
-        stock: { chilled: { shelf: 240, backroom: 160, shortDated: true } },
+        stock: { chilled: { shelf: 110, backroom: 40, shortDated: true } },
       }),
     focus: () => ({ staff: [], zones: ['chilled'], priceDept: 'chilled' }),
-    checklist: (_s, plan) => [{ label: `Chilled price: ${plan.pricing.chilled}`, done: true }],
+    checklist: (_s, plan) => [{ label: `Chilled: ${CONFIG.pricing[plan.pricing.chilled].label}`, done: true }],
     result: (_b, after, r, plan) => pricingResult('chilled', after, r, plan),
   },
   {
@@ -328,31 +328,33 @@ export const LESSONS: Lesson[] = [
         stock: { produce: { shelf: 90, backroom: 0 } },
       }),
     focus: () => ({ staff: [], zones: ['produce'], priceDept: 'produce' }),
-    checklist: (_s, plan) => [{ label: `Fruit & veg price: ${plan.pricing.produce}`, done: true }],
+    checklist: (_s, plan) => [{ label: `Fruit & veg: ${CONFIG.pricing[plan.pricing.produce].label}`, done: true }],
     result: (_b, after, r, plan) => pricingResult('produce', after, r, plan),
   },
 ];
 
-function pricingResult(d: DeptId, after: SimState, r: HourReport, plan: HourPlan): LessonResult {
+function pricingResult(d: DeptId, _after: SimState, r: HourReport, plan: HourPlan): LessonResult {
   const x = r.dept[d];
   const gp = x.revenue - x.cogs;
-  const left = r0(deptUnits(after, d).shelf + deptUnits(after, d).backroom);
-  const short = r0(shortDatedUnits(after, d));
+  const binned = r.waste.filter((w) => w.dept === d);
+  const binnedQty = r0(binned.reduce((t, w) => t + w.qty, 0));
+  const binnedCost = binned.reduce((t, w) => t + w.cost, 0);
   const unmet = r0(x.lostShelfGap + x.lostNoStock);
   const tier = plan.pricing[d];
+  const name = CONFIG.pricing[tier].label;
   return {
     passed: true,
-    choice: tier,
+    choice: CONFIG.pricing[tier].short,
     sentence:
       d === 'chilled'
-        ? `At ${tier} prices: ${r0(x.sold)} sold, £${r0(gp)} gross profit, ${short} short-dated still to sell before 17:00.`
-        : `At ${tier} prices: ${r0(x.sold)} sold, £${r0(gp)} gross profit, ${unmet} wanted but not on the shelf.`,
+        ? `${name}: ${r0(x.sold)} sold, ${binnedQty} binned at 17:00. Gross profit £${r0(gp)}, after waste £${r0(gp - binnedCost)}.`
+        : `${name}: all ${r0(x.sold)} sold, ${unmet} more wanted. Gross profit £${r0(gp)}.`,
     figures: [
       { label: 'Sold', value: String(r0(x.sold)) },
-      { label: 'Gross profit', value: `£${r0(gp)}` },
       { label: 'Takings', value: `£${r0(x.revenue)}` },
-      d === 'chilled' ? { label: 'Short-dated left', value: String(short) } : { label: 'Wanted, not found', value: String(unmet) },
-      { label: 'Left in stock', value: String(left) },
+      { label: 'Gross profit', value: `£${r0(gp)}` },
+      d === 'chilled' ? { label: 'Binned at close', value: `${binnedQty} · £${r0(binnedCost)}` } : { label: 'Wanted, not found', value: String(unmet) },
+      d === 'chilled' ? { label: 'After waste', value: `£${r0(gp - binnedCost)}` } : { label: 'Per item', value: `£${(x.sold > 0 ? gp / x.sold : 0).toFixed(2)}` },
     ],
   };
 }

@@ -192,6 +192,8 @@ export interface PriceOption {
   sold: number;
   revenue: number;
   grossProfit: number;
+  /** Cost of this department's stock written off during the estimate (incl. binning at close). */
+  waste: number;
   leftover: number;
   shortDatedLeft: number;
   satisfaction: number;
@@ -222,6 +224,7 @@ export function priceOptions(state: SimState, plan: HourPlan, d: DeptId, steps =
       sold: x?.sold ?? 0,
       revenue: x?.revenue ?? 0,
       grossProfit: x ? x.revenue - x.cogs : 0,
+      waste: after ? after.report.waste.filter((w) => w.dept === d).reduce((t, w) => t + w.cost, 0) : 0,
       leftover: left.shelf + left.backroom + left.dock,
       shortDatedLeft: after ? shortDatedUnits(after.state, d) : 0,
       satisfaction: C.pricing[tier].satisfaction,
@@ -231,26 +234,31 @@ export function priceOptions(state: SimState, plan: HourPlan, d: DeptId, steps =
   });
 }
 
-/** One short trade-off for the selected option. Never says which price is best. */
-export function priceTradeOff(state: SimState, opts: PriceOption[], tier: PriceTier, d: DeptId): string {
+/** True when every price is expected to sell (almost) the same number of items. */
+export function allSellOut(opts: PriceOption[]): boolean {
+  const sold = opts.map((o) => o.sold);
+  const lo = Math.min(...sold);
+  return lo > 0 && Math.max(...sold) - lo <= Math.max(2, lo * 0.03) && opts.every((o) => o.unmet > 1);
+}
+
+/**
+ * One short trade-off for the selected option, from the estimate's own figures
+ * compared with the regular price. Never says which price is best.
+ */
+export function priceTradeOff(_state: SimState, opts: PriceOption[], tier: PriceTier, _d: DeptId): string {
   const o = opts.find((x) => x.tier === tier)!;
-  const std = opts.find((x) => x.tier === 'standard')!;
-  const hoursLeft = C.hours - state.hour;
-  const shortNow = shortDatedUnits(state, d);
-  const limited = std.unmet > std.wanted * 0.1;
-  if (tier === 'value') {
-    if (o.walkouts >= 1) return 'More demand, but tills are already stretched.';
-    if (o.unmet > std.unmet + 3) return 'More demand than the shelves can meet.';
-    if (shortNow > 0) return 'Lower margin, but more short-dated stock sells before expiry.';
-    return 'Lower margin per item, more items sold, happier customers.';
-  }
-  if (tier === 'premium') {
-    if (o.shortDatedLeft > 5 && hoursLeft <= 3) return 'Lower demand may leave stock unsold before expiry.';
-    if (limited) return 'Stock is limited; higher margin may offset fewer sales.';
-    return 'Higher margin, fewer items sold, customers less pleased.';
-  }
-  if (limited) return 'Demand already exceeds what the shelves can supply.';
-  return 'Baseline demand and margin.';
+  const reg = opts.find((x) => x.tier === 'regular')!;
+  const name = C.pricing[tier].label;
+  if (allSellOut(opts)) return `All prices are expected to sell out; ${name} ${tier === 'low' ? 'earns less' : tier === 'high' ? 'earns more' : 'earns the regular margin'} per item.`;
+  if (tier === 'regular') return 'The usual price and margin.';
+  const items = Math.round(o.sold - reg.sold);
+  const net = o.grossProfit - o.waste - (reg.grossProfit - reg.waste);
+  const parts = [`${Math.abs(items)} ${items >= 0 ? 'more' : 'fewer'} sold than at the regular price`];
+  const wasteDiff = o.waste - reg.waste;
+  if (Math.abs(wasteDiff) >= 1) parts.push(`${money(Math.abs(wasteDiff))} ${wasteDiff < 0 ? 'less' : 'more'} binned`);
+  if (o.walkouts - reg.walkouts >= 1) parts.push(`${Math.round(o.walkouts - reg.walkouts)} more walk-outs`);
+  parts.push(`gross profit after waste ${net >= 0 ? '+' : '−'}${money(Math.abs(net))}`);
+  return parts.join('; ') + '.';
 }
 
 /** Running markdowns or promotions that change the comparison. */

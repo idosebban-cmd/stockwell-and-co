@@ -120,7 +120,7 @@ function factors(state: SimState, reports: HourReport[]): Factor[] {
   if (state.ledger.waste > 1) out.push({ label: 'Waste', amount: -state.ledger.waste, detail: wasteDetail(reports) });
   if (Math.abs(pricing) > 5)
     out.push({
-      label: pricing > 0 ? 'Premium pricing' : 'Value pricing and markdowns',
+      label: pricing > 0 ? 'High prices' : 'Low prices and markdowns',
       amount: pricing,
       detail: pricing > 0 ? 'Extra takings from charging above standard prices (before any lost demand).' : 'Takings given up by charging below standard prices (in exchange for demand and goodwill).',
     });

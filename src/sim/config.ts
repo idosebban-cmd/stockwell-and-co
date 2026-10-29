@@ -15,9 +15,9 @@
 export type DeptId = 'produce' | 'chilled' | 'ambient';
 export const DEPTS: readonly DeptId[] = ['produce', 'chilled', 'ambient'] as const;
 
-export type PriceTier = 'value' | 'standard' | 'premium';
+export type PriceTier = 'low' | 'regular' | 'high';
 export type ChilledLife = 'short' | 'long';
-export const PRICE_TIERS: readonly PriceTier[] = ['value', 'standard', 'premium'] as const;
+export const PRICE_TIERS: readonly PriceTier[] = ['low', 'regular', 'high'] as const;
 
 export const CONFIG = {
   /** Shop opens at 09:00 and closes at 17:00: eight hourly turns. */
@@ -58,6 +58,8 @@ export const CONFIG = {
       /** Share of items left in abandoned baskets that must be binned. */
       abandonedBinShare: 0.1,
       perishable: true,
+      /** Price elasticity: a 10% price change moves the items wanted by about this × 10%. Loose fruit and veg: shoppers notice, but compare less than branded goods. */
+      priceElasticity: 2.2,
     },
     chilled: {
       name: 'Chilled food',
@@ -72,6 +74,8 @@ export const CONFIG = {
       dockSpoilPerHour: 0.08,
       abandonedBinShare: 0.3,
       perishable: true,
+      /** Price elasticity: a 10% price change moves the items wanted by about this × 10%. Own-label chilled: similar. */
+      priceElasticity: 2.2,
     },
     ambient: {
       name: 'Cupboard essentials',
@@ -86,6 +90,8 @@ export const CONFIG = {
       dockSpoilPerHour: 0,
       abandonedBinShare: 0,
       perishable: false,
+      /** Price elasticity: a 10% price change moves the items wanted by about this × 10%. Branded tins and packets: the easiest prices to compare with the supermarket up the road. */
+      priceElasticity: 2.7,
     },
   } satisfies Record<DeptId, DeptConfig>,
 
@@ -131,11 +137,21 @@ export const CONFIG = {
     maxMidday: 1500,
   },
 
+  /**
+   * Department price levels. Product quality is the same at every level.
+   * Items wanted respond to price through each department's `priceElasticity`
+   * (a nearby competitor is a short walk away), so at ordinary stock levels the
+   * regular price is close to the best gross profit; with short stock the high
+   * price earns more, and with stock that would otherwise be binned the low one. `tripMult` is the whole-shop effect:
+   * shoppers who find one department cheap do a little more of the rest of
+   * their shop here (and a little less when it is dear). Bigger baskets take
+   * longer to scan (see `checkout`).
+   */
   pricing: {
-    value: { priceMult: 0.9, demandMult: 1.18, satisfaction: 4, label: 'Value' },
-    standard: { priceMult: 1, demandMult: 1, satisfaction: 0, label: 'Standard' },
-    premium: { priceMult: 1.1, demandMult: 0.86, satisfaction: -5, label: 'Premium' },
-  } satisfies Record<PriceTier, { priceMult: number; demandMult: number; satisfaction: number; label: string }>,
+    low: { priceMult: 0.9, tripMult: 1.04, satisfaction: 4, label: 'Low price', short: 'Low' },
+    regular: { priceMult: 1, tripMult: 1, satisfaction: 0, label: 'Regular price', short: 'Regular' },
+    high: { priceMult: 1.1, tripMult: 0.97, satisfaction: -5, label: 'High price', short: 'High' },
+  } satisfies Record<PriceTier, { priceMult: number; tripMult: number; satisfaction: number; label: string; short: string }>,
 
   demand: {
     /** Baseline customers per hour, 09:00 to 16:00 starts (curated Saturday). */
@@ -153,8 +169,15 @@ export const CONFIG = {
 
   checkout: {
     tills: 3,
-    /** Customers served per hour by one person at full energy. */
+    /** Customers served per hour by one person at full energy, with an ordinary basket. */
     customersPerHour: 30,
+    /**
+     * Time at the till: a fixed part (greeting, paying) plus scanning and
+     * bagging per item. With the ordinary basket (10 items) this is 2 minutes,
+     * i.e. `customersPerHour`. Fuller baskets slow the tills; emptier ones speed them up.
+     */
+    serviceFixedMinutes: 0.75,
+    servicePerItemMinutes: 0.125,
     /** Minimum time at a till, in minutes, even with no queue. */
     baseServiceMinutes: 1,
     /** Customers start leaving once the expected wait exceeds this. */
@@ -264,6 +287,7 @@ export interface DeptConfig {
   short: string;
   unitCost: number;
   standardPrice: number;
+  priceElasticity: number;
   basket: number;
   shelfCapacity: number;
   backroomCapacity: number;
