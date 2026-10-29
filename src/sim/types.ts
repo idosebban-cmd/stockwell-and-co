@@ -135,8 +135,40 @@ export interface FridgeState {
   repairAtStep: number | null;
 }
 
+/**
+ * Everything that differs between trading days: how long the shop is open,
+ * what is installed, what the player may use yet. Quick play uses the fully
+ * fitted Saturday shop (`QUICK_CONTEXT`); the campaign builds one per day.
+ */
+export interface DayContext {
+  mode: 'quick' | 'campaign';
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  /** Trading hours; every day opens at 09:00. */
+  hours: number;
+  /** Departments the shop has. Others have no stock, no demand and no jobs. */
+  depts: DeptId[];
+  /** Installed tills (each needs an operator). */
+  tills: number;
+  shelfCap: Record<DeptId, number>;
+  backroomCap: Record<DeptId, number>;
+  /** Share per hour lost from stock left on the dock. */
+  dockSpoil: Record<DeptId, number>;
+  /** Hour the midday delivery reaches the dock; null when there is none today. */
+  middayHour: number | null;
+  /** Footfall multiplier from the shop's reputation (1 in Quick play). */
+  reputationFootfall: number;
+  /** Day costs by line (rent, energy, refrigeration…), accrued evenly over trading hours. */
+  overheads: Record<string, number>;
+  /** Actions the player may use today. */
+  actions: ActionRequest['kind'][];
+  /** Whether prices can be changed today. */
+  pricing: boolean;
+}
+
 export interface SimState {
   seed: number;
+  ctx: DayContext;
   scenario: Scenario;
   /** Next hour to run: 0..8. 8 = closed. */
   hour: number;

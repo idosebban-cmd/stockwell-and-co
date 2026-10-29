@@ -105,23 +105,27 @@ export const CONFIG = {
     ],
   } satisfies Record<DeptId, CarriedBatch[]>,
 
-  /** What a produce or cupboard delivery looks like. Chilled dates are the player's choice (below). */
-  deliveryDating: {
-    produce: [{ share: 1, label: 'Fresh produce', expiresAt: null }],
-    ambient: [{ share: 1, label: 'Tins & packets', expiresAt: null }],
-  } satisfies Record<'produce' | 'ambient', DatingShare[]>,
+  /**
+   * Explicit dates. Stock is dated "use by <day>"; it expires at `useByHour`
+   * (17:00) that day, or when the shop closes if that is earlier, so stock
+   * past its date before the next opening is binned at closing. Times are hours
+   * from today's opening; every day opens at 09:00, 24 hours after the last.
+   */
+  calendar: { hoursPerDay: 24, useByHour: 8 },
+  /** Days a delivery keeps, counting the day it arrives as 0 (null: keeps). Chilled uses `chilledLife`. */
+  shelfLife: { produce: 3, chilled: 3, ambient: null } satisfies Record<DeptId, number | null>,
+  shelfLabels: { produce: 'Fresh produce', chilled: 'Chilled', ambient: 'Tins & packets' } satisfies Record<DeptId, string>,
 
   /**
-   * Chilled deliveries come in two shelf lives, chosen per delivery. The shop is
-   * closed on Sunday, so "use by Sunday" stock that hasn't sold is binned at
-   * close. Longer-life stock costs more but keeps its value if it doesn't sell.
-   * `departments.chilled.unitCost` is the reference cost used for margin estimates
-   * and emergency orders.
+   * Chilled deliveries come in two shelf lives, chosen per delivery: "use by
+   * today" (cheaper; whatever doesn't sell is binned at closing) or longer-life
+   * (dearer, keeps three more days). `departments.chilled.unitCost` is the
+   * reference cost used for margin estimates and emergency orders.
    */
   chilledLife: {
-    short: { name: 'Short-dated', label: 'Use by Sunday', expiresAt: 8, unitCost: 1.35 },
-    long: { name: 'Longer-life', label: 'Use by Wednesday', expiresAt: null, unitCost: 1.55 },
-  } satisfies Record<ChilledLife, { name: string; label: string; expiresAt: number | null; unitCost: number }>,
+    short: { name: 'Short-dated', label: 'Use by today', days: 0, unitCost: 1.35 },
+    long: { name: 'Longer-life', label: 'Keeps 3 more days', days: 3, unitCost: 1.55 },
+  } satisfies Record<ChilledLife, { name: string; label: string; days: number; unitCost: number }>,
 
   /** Opening order. Morning stock is put away by the night crew. */
   openingOrder: {

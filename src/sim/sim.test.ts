@@ -170,7 +170,7 @@ describe('stock conservation and accounting', () => {
     const { state } = playShift(SEED, sensible, big);
     expect(total(state.stock.ambient.backroom) + total(state.stock.ambient.shelf)).toBeGreaterThan(0);
     const leftovers = [...state.stock.chilled.shelf, ...state.stock.chilled.backroom];
-    expect(leftovers.every((b) => b.expiresAt === null)).toBe(true);
+    expect(leftovers.every((b) => b.expiresAt === null || b.expiresAt > CONFIG.calendar.hoursPerDay)).toBe(true);
     expect(inventoryValue(state)).toBeGreaterThan(0);
   });
 });
@@ -280,7 +280,7 @@ describe('expiry and perishables', () => {
     expect(expired.reduce((t, w) => t + w.qty, 0)).toBeGreaterThan(10);
     const left = [...state.stock.chilled.shelf, ...state.stock.chilled.backroom, ...state.stock.chilled.dock];
     expect(total(left)).toBeGreaterThan(10);
-    expect(left.every((b) => b.label === 'Use by Wednesday')).toBe(true);
+    expect(left.every((b) => b.label === 'Use by Tuesday' && b.expiresAt! > CONFIG.calendar.hoursPerDay)).toBe(true);
   });
   it('stock left on the dock spoils (chilled faster than produce); ambient does not', () => {
     let state = startDay(SEED, recommendedSetup());
