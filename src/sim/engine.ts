@@ -158,6 +158,7 @@ export function startDay(seed: number, setup: SetupPlan): SimState {
     seed,
     scenario,
     hour: 0,
+    step: 0,
     cash: C.startingCash - check.cost,
     openingInventoryValue,
     ledger: { revenue: 0, cogs: 0, waste: 0, wages: 0, extras: {}, stockPurchases: check.cost },
@@ -574,10 +575,23 @@ function applyActions(state: SimState, actions: ActionRequest[]): void {
       case 'repair':
         addExtra(state, 'Chiller repair', A.repair.cost);
         state.used.repair = true;
-        state.fridge.repairAtStep = h * STEPS + A.repair.arrivalSteps;
+        state.fridge.repairAtStep = h * STEPS + (state.step ?? 0) + A.repair.arrivalSteps;
         break;
     }
   }
+}
+
+/** Output multiplier for a person in a job: speciality, temp, and tiredness. */
+export function jobRate(s: StaffMember, a: AssignmentId): number {
+  return skill(s, a);
+}
+
+/** Work per hour at full speed for a job, in its own unit (customers or items). */
+export function baseJobRate(a: AssignmentId): number {
+  if (a === 'tills') return C.checkout.customersPerHour;
+  if (a === 'receive') return C.staff.receiveRate;
+  if (a.startsWith('replenish:')) return C.departments[a.split(':')[1] as DeptId].replenishRate;
+  return 0;
 }
 
 function skill(s: StaffMember, a: AssignmentId): number {
@@ -601,6 +615,7 @@ function emptyDeptReport(): DeptHourReport {
     lostNoStock: 0,
     abandonedItems: 0,
     replenished: 0,
+    rescued: 0,
     replenishCapacity: 0,
     received: 0,
     shelfEmptySteps: 0,
@@ -614,11 +629,26 @@ function emptyDeptReport(): DeptHourReport {
   };
 }
 
+/** Runs the rest of the current hour (normally all six ten-minute steps). */
 export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}): { state: SimState; report: HourReport } {
+  return runSteps(input, plan, STEPS - (input.step ?? 0), opts);
+}
+
+/**
+ * Runs `n` ten-minute steps of the current hour (never past the hour's end).
+ * Wages, overheads, fatigue and rest are pro-rated per step; breaks, hours
+ * worked and strain are settled when the hour completes, so a full hour gives
+ * exactly the same result as before short intervals existed.
+ */
+export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOptions = {}): { state: SimState; report: HourReport } {
   const errors = planErrors(input, plan);
   if (errors.length) throw new Error(errors.join(' '));
   const state: SimState = structuredClone(input);
   const h = state.hour;
+  const from = state.step ?? 0;
+  const count = Math.max(1, Math.min(Math.round(n), STEPS - from));
+  const to = from + count;
+  const share = count / STEPS;
   const sc = state.scenario;
   const waste: WasteLine[] = [];
   const messages: string[] = [];
@@ -681,7 +711,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
   let maxQueue = state.queue.customers;
   const steps: StepSnapshot[] = [];
 
-  for (let k = 0; k < STEPS; k++) {
+  for (let k = from; k < to; k++) {
     const stepWork = { received: 0, moved: { produce: 0, chilled: 0, ambient: 0 } as Record<DeptId, number> };
     const abs = h * STEPS + k;
     if (state.fridge.status === 'fault' && state.fridge.repairAtStep !== null && abs >= state.fridge.repairAtStep) {
@@ -727,6 +757,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
           cap -= rescue;
           used.repl[d] += rescue;
           stepWork.moved[d] += rescue;
+          dept[d].rescued += rescue;
         }
         const stranded = S.total(st.shelf) - shelfCap;
         if (stranded > 1e-9 && d === 'chilled') {
@@ -861,25 +892,35 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
     }
     let strainAdded = 0;
     if (a === 'break') {
-      s.energy = Math.min(100, s.energy + C.staff.energy.break);
-      s.consecutive = 0;
-      s.breaks += 1;
+      s.energy = Math.min(100, s.energy + C.staff.energy.break * share);
+      s.stepsRested = (s.stepsRested ?? 0) + count;
     } else {
       const key = a === 'tills' ? 'tills' : a === 'receive' ? 'receive' : 'replenish';
       const drain = C.staff.energy[key] * (s.speciality === 'stamina' ? C.staff.staminaDrain : 1);
-      s.energy = Math.max(0, s.energy + drain);
-      s.consecutive += 1;
-      s.hoursWorked += 1;
-      const W = C.wellbeing;
-      if (s.energy < W.lowEnergyBelow) strainAdded += (W.lowEnergyBelow - s.energy) * W.lowEnergyStrainPerPoint;
-      if (s.consecutive > W.hoursBeforeBreakNeeded) strainAdded += (s.consecutive - W.hoursBeforeBreakNeeded) * W.consecutiveStrainStep;
+      s.energy = Math.max(0, s.energy + drain * share);
+      s.stepsWorked = (s.stepsWorked ?? 0) + count;
+    }
+    if (to === STEPS) {
+      // The hour is complete: half an hour or more of rest counts as a break.
+      if ((s.stepsRested ?? 0) >= STEPS / 2) {
+        s.consecutive = 0;
+        s.breaks += 1;
+      } else if ((s.stepsWorked ?? 0) > 0) {
+        s.consecutive += 1;
+        s.hoursWorked += 1;
+        const W = C.wellbeing;
+        if (s.energy < W.lowEnergyBelow) strainAdded += (W.lowEnergyBelow - s.energy) * W.lowEnergyStrainPerPoint;
+        if (s.consecutive > W.hoursBeforeBreakNeeded) strainAdded += (s.consecutive - W.hoursBeforeBreakNeeded) * W.consecutiveStrainStep;
+      }
+      s.stepsWorked = 0;
+      s.stepsRested = 0;
     }
     s.strain += strainAdded;
     s.lastAssignment = a;
-    if (s.isTemp) addExtra(state, 'Agency temp', C.actions.temp.hourlyFee);
+    if (s.isTemp) addExtra(state, 'Agency temp', C.actions.temp.hourlyFee * share);
     else {
-      state.ledger.wages += C.wagePerHour;
-      state.cash -= C.wagePerHour;
+      state.ledger.wages += C.wagePerHour * share;
+      state.cash -= C.wagePerHour * share;
     }
     staffReports.push({
       id: s.id,
@@ -892,17 +933,20 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
       strainAdded,
     });
   }
-  addExtra(state, 'Store overheads', C.overheadPerDay / C.hours);
+  addExtra(state, 'Store overheads', (C.overheadPerDay / C.hours) * share);
 
-  // Satisfaction for the hour, with reasons.
+  // Satisfaction for the interval, weighted by the customers who came in.
+  const arrived = customers * share;
   const avgWait = served + abandoned > 0 ? waitWeighted / (served + abandoned) : 0;
-  const { score, reasons } = hourSatisfaction(state, h, dept, mult, avgWait, abandoned, customers);
-  state.satisfaction.weightedSum += score * customers;
-  state.satisfaction.customers += customers;
+  const { score, reasons } = hourSatisfaction(state, h, dept, mult, avgWait, abandoned, arrived);
+  state.satisfaction.weightedSum += score * arrived;
+  state.satisfaction.customers += arrived;
 
   const report: HourReport = {
     hour: h,
-    customersArrived: customers,
+    fromStep: from,
+    toStep: to,
+    customersArrived: arrived,
     customersServed: served,
     customersAbandoned: abandoned,
     avgWait,
@@ -928,10 +972,14 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
   };
 
   // Advance the clock.
-  state.hour = h + 1;
   const nextWaste: WasteLine[] = [];
-  if (state.hour >= C.hours) closeDay(state, report, nextWaste);
-  else prepareHour(state, nextWaste);
+  if (to < STEPS) state.step = to;
+  else {
+    state.step = 0;
+    state.hour = h + 1;
+    if (state.hour >= C.hours) closeDay(state, report, nextWaste);
+    else prepareHour(state, nextWaste);
+  }
   // Expiry at the hour boundary belongs to the hour just finished.
   for (const w of nextWaste) {
     const ex = report.waste.find((x) => x.dept === w.dept && x.reason === w.reason);

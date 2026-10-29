@@ -1,34 +1,12 @@
 /**
- * First-shift tips (one at a time, dismissible) and the short labels the shop
- * shows next to the dock and departments when something becomes relevant.
+ * The short labels the shop shows next to the dock and departments when
+ * something becomes relevant.
  */
 import { CONFIG, hourLabel } from '../sim/config';
 import { deptUnits, onShift, shortDatedUnits } from '../sim/engine';
 import { total } from '../sim/stock';
 import type { HourPlan, SimState } from '../sim/types';
 import type { ShopNotice } from './Store';
-
-export type TipId = 'select' | 'assign' | 'run';
-export const TIP_ORDER: TipId[] = ['select', 'assign', 'run'];
-
-/** The tip to show now, or null. */
-export function activeTip(done: string[], selected: string | null): TipId | null {
-  const left = TIP_ORDER.filter((t) => !done.includes(t));
-  if (!left.length) return null;
-  if (selected && !done.includes('assign')) return 'assign';
-  return left[0] === 'assign' && !selected ? (done.includes('select') ? 'assign' : 'select') : left[0];
-}
-
-export function tipText(tip: TipId, name?: string): string {
-  switch (tip) {
-    case 'select':
-      return 'Click someone to choose who to move.';
-    case 'assign':
-      return `Now click where ${name ?? 'they'} should work: a department, the tills, the dock or the break room.`;
-    case 'run':
-      return 'Happy with the jobs? Run the hour.';
-  }
-}
 
 /** Labels attached to places in the shop, shown only when they matter. */
 export function shopNotices(state: SimState, plan: HourPlan | null): ShopNotice[] {

@@ -4,7 +4,19 @@ import { makeScenario } from '../sim/scenario';
 import { Shopper, StaffFigure } from './art/Characters';
 
 /** First screen: the shopfront, one sentence and one button. */
-export function Opening({ seed, onStart, onCustom }: { seed: number; onStart: () => void; onCustom: () => void }) {
+export function Opening({
+  seed,
+  onStart,
+  onCustom,
+  onLearn,
+  returning,
+}: {
+  seed: number;
+  onStart: () => void;
+  onCustom: () => void;
+  onLearn: () => void;
+  returning: boolean;
+}) {
   const scenario = makeScenario(seed);
   return (
     <main className="opening" id="main">
@@ -15,9 +27,28 @@ export function Opening({ seed, onStart, onCustom }: { seed: number; onStart: ()
           {scenario.curated ? '' : `${scenario.name}. `}Run the shop through one busy Saturday and close with {money(CONFIG.targets.operatingProfit)} profit, happy
           customers and a team still standing.
         </p>
-        <button type="button" className="btn-primary btn-start" onClick={onStart} autoFocus>
-          Start shift
-        </button>
+        <div className="opening-buttons">
+          {returning ? (
+            <>
+              <button type="button" className="btn-primary btn-start" onClick={onStart} autoFocus>
+                Full Saturday
+              </button>
+              <button type="button" className="btn-secondary btn-start-2" onClick={onLearn}>
+                Replay tutorial
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-primary btn-start" onClick={onLearn} autoFocus>
+                Learn to play
+              </button>
+              <button type="button" className="btn-secondary btn-start-2" onClick={onStart}>
+                Full Saturday
+              </button>
+            </>
+          )}
+        </div>
+        {!returning && <p className="tiny muted">Learn to play: five short lessons, about five minutes.</p>}
         <button type="button" className="btn-link" onClick={onCustom}>
           Custom setup
         </button>

@@ -9,6 +9,8 @@ interface Props {
   onSettings: () => void;
   onMenu: () => void;
   saveOk: boolean;
+  /** During the guided shift the bar shows the lesson instead of the day's score. */
+  tutorial?: { label: string; progress: number; onExit: () => void };
 }
 
 export function Brand({ small }: { small?: boolean }) {
@@ -44,27 +46,42 @@ function Indicator({
   ok,
   open,
   onToggle,
+  progress,
+  status,
 }: {
   k: StatKey;
   label: string;
   value: string;
   target: string;
-  ok: boolean;
+  ok: boolean | null;
   open: boolean;
   onToggle: () => void;
+  /** 0..1 progress towards a closing target (profit). */
+  progress?: number;
+  status: string;
 }) {
   return (
     <div className="indicator-wrap">
-      <button type="button" className={`indicator ${ok ? 'ind-ok' : 'ind-bad'}`} aria-expanded={open} aria-controls={`ind-${k}`} onClick={onToggle}>
+      <button type="button" className={`indicator ${ok === null ? 'ind-neutral' : ok ? 'ind-ok' : 'ind-bad'}`} aria-expanded={open} aria-controls={`ind-${k}`} onClick={onToggle}>
         <span className="stat-label">{label}</span>
         <span className="stat-value">
-          {value} <span className="ind-mark" aria-label={ok ? 'on target' : 'below target'}>{ok ? '✓' : '!'}</span>
+          {value}{' '}
+          {ok !== null && (
+            <span className="ind-mark" aria-label={ok ? 'on target' : 'below target'}>
+              {ok ? '✓' : '!'}
+            </span>
+          )}
         </span>
+        {progress !== undefined && (
+          <span className="ind-progress" aria-hidden="true">
+            <span style={{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }} />
+          </span>
+        )}
       </button>
       {open && (
         <div className="ind-pop" id={`ind-${k}`} role="region" aria-label={`${label} target`}>
           <strong>Target: {target}</strong>
-          <span className={ok ? 'good' : 'bad'}>{ok ? 'On target right now' : 'Below target right now'}</span>
+          <span>{status}</span>
           <p>{EXPLAIN[k]}</p>
         </div>
       )}
@@ -72,7 +89,7 @@ function Indicator({
   );
 }
 
-export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk }: Props) {
+export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial }: Props) {
   const T = CONFIG.targets;
   const [open, setOpen] = useState<StatKey | null>(null);
   useEffect(() => {
@@ -90,9 +107,21 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk }: Props) 
     };
   }, [open]);
   const toggle = (k: StatKey) => setOpen((o) => (o === k ? null : k));
+  const closed = !!state && state.hour >= CONFIG.hours;
   return (
     <header className="statusbar">
       <Brand />
+      {tutorial && (
+        <div className="stats tutorial-bar">
+          <span className="lesson-label">{tutorial.label}</span>
+          <span className="ind-progress lesson-progress" aria-hidden="true">
+            <span style={{ width: `${tutorial.progress * 100}%` }} />
+          </span>
+          <button type="button" className="btn-ghost" onClick={tutorial.onExit}>
+            Exit tutorial
+          </button>
+        </div>
+      )}
       {state && (
         <div className="stats" aria-label="Shop status">
           <div className="stat">
@@ -106,27 +135,37 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk }: Props) 
           <Indicator
             k="profit"
             label="Profit"
-            value={money(operatingProfit(state))}
+            value={`${money(operatingProfit(state))} / ${money(T.operatingProfit)}`}
             target={`${money(T.operatingProfit)} or more by 17:00`}
-            ok={operatingProfit(state) >= T.operatingProfit}
+            ok={closed ? operatingProfit(state) >= T.operatingProfit : null}
+            progress={operatingProfit(state) / T.operatingProfit}
+            status={
+              closed
+                ? operatingProfit(state) >= T.operatingProfit
+                  ? 'Target met'
+                  : 'Target missed'
+                : `${money(Math.max(0, T.operatingProfit - operatingProfit(state)))} to go · ${CONFIG.hours - state.hour} hours left`
+            }
             open={open === 'profit'}
             onToggle={() => toggle('profit')}
           />
           <Indicator
             k="satisfaction"
             label="Customers"
-            value={String(Math.round(satisfactionSoFar(state)))}
+            value={`${Math.round(satisfactionSoFar(state))}`}
             target={`${T.satisfaction} or more`}
             ok={satisfactionSoFar(state) >= T.satisfaction}
+            status={satisfactionSoFar(state) >= T.satisfaction ? 'On target so far' : 'Below target so far'}
             open={open === 'satisfaction'}
             onToggle={() => toggle('satisfaction')}
           />
           <Indicator
             k="wellbeing"
             label="Staff"
-            value={String(Math.round(wellbeing(state)))}
+            value={`${Math.round(wellbeing(state))}`}
             target={`${T.wellbeing} or more`}
             ok={wellbeing(state) >= T.wellbeing}
+            status={wellbeing(state) >= T.wellbeing ? 'On target so far' : 'Below target so far'}
             open={open === 'wellbeing'}
             onToggle={() => toggle('wellbeing')}
           />

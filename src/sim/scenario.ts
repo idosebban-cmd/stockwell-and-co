@@ -5,8 +5,25 @@ import type { EventKind, Scenario, ScenarioEvent } from './types';
 /** Seed 1 is the curated, approachable first Saturday. */
 export const CURATED_SEED = 1;
 
+/** Seed 0 is the guided shift: steady footfall, no hidden variation, no events. */
+export const TUTORIAL_SEED = 0;
+
 export function makeScenario(seed: number): Scenario {
+  if (seed === TUTORIAL_SEED) return tutorialScenario();
   return seed === CURATED_SEED ? curated() : generated(seed);
+}
+
+function tutorialScenario(): Scenario {
+  const n = CONFIG.hours;
+  return {
+    seed: TUTORIAL_SEED,
+    name: 'Learn to play',
+    curated: true,
+    forecast: Array.from({ length: n }, () => 40),
+    customerNoise: Array.from({ length: n }, () => 1),
+    deptNoise: Object.fromEntries(DEPTS.map((d) => [d, Array.from({ length: n }, () => 1)])) as Record<DeptId, number[]>,
+    events: [],
+  };
 }
 
 function noise(rng: () => number, amount: number, n: number): number[] {

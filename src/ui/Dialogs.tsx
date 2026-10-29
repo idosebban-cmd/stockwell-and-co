@@ -98,9 +98,6 @@ export function SettingsDialog({ settings, onChange, onClose }: { settings: Sett
             <input type="radio" name="speed" checked={settings.replaySpeed === 'fast'} onChange={() => onChange({ replaySpeed: 'fast' })} /> Fast
           </label>
         </fieldset>
-        <button type="button" className="btn-secondary" onClick={() => onChange({ tipsDone: [] })} disabled={settings.tipsDone.length === 0}>
-          Show the first-shift tips again
-        </button>
         <p className="tiny muted">Replay settings never change results.</p>
       </div>
     </Modal>
@@ -113,9 +110,11 @@ export function Menu({
   onRetry,
   onNew,
   onCurated,
+  onLearn,
 }: {
   seed: number;
   onClose: () => void;
+  onLearn: () => void;
   onRetry: () => void;
   onNew: () => void;
   onCurated: () => void;
@@ -128,6 +127,9 @@ export function Menu({
         </p>
         <button type="button" className="btn-primary" onClick={onRetry}>
           Retry same Saturday
+        </button>
+        <button type="button" className="btn-ghost" onClick={onLearn}>
+          Learn to play (guided shift)
         </button>
         <button type="button" className="btn-ghost" onClick={onNew}>
           New Saturday (different demand and events)

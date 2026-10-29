@@ -50,13 +50,19 @@ export interface StoreView {
 export interface ShopNotice {
   zone: ZoneId;
   text: string;
-  tone: 'info' | 'warn';
+  tone: 'info' | 'warn' | 'good' | 'bad';
+}
+
+/** What the selected employee would achieve at a place. */
+export interface JobHint {
+  text: string;
+  blocked: boolean;
 }
 
 const NOTICE_AT: Record<ZoneId, [number, number]> = {
-  dock: [486, 58],
+  dock: [486, 50],
   produce: [146, 196],
-  chilled: [474, 248],
+  chilled: [780, 168],
   ambient: [800, 262],
   break: [812, 52],
   tills: [600, 448],
@@ -78,6 +84,13 @@ interface Props {
   interactive: boolean;
   animating: boolean;
   reducedMotion: boolean;
+  /** Places and people the current lesson points at. */
+  highlightZones?: ZoneId[];
+  highlightStaff?: string[];
+  /** Shown on each place while someone is selected. */
+  jobHints?: Partial<Record<ZoneId, JobHint>>;
+  /** Places with a problem worth opening. */
+  problemZones?: Partial<Record<ZoneId, 'urgent' | 'warn'>>;
 }
 
 const W = 1000;
@@ -103,8 +116,8 @@ const SLOTS: Record<AssignmentId, [number, number][]> = {
     [806, 390],
   ],
   receive: [
-    [426, 106],
-    [546, 106],
+    [430, 130],
+    [542, 130],
   ],
   break: [
     [772, 128],
@@ -152,6 +165,10 @@ function hash(a: number, b: number): number {
 
 function StoreImpl(props: Props) {
   const { view, staff, assignments, activity, selected, onSelectStaff, onZone, context, onContext, interactive, animating, reducedMotion } = props;
+  const highlightZones = props.highlightZones ?? [];
+  const highlightStaff = props.highlightStaff ?? [];
+  const hints = props.jobHints ?? {};
+  const problemZones = props.problemZones ?? {};
   const counts = new Map<AssignmentId, number>();
   const placed: { s: StaffMember; a: AssignmentId; x: number; y: number }[] = [];
   for (const s of staff) {
@@ -215,9 +232,10 @@ function StoreImpl(props: Props) {
         const n = counts.get(a) ?? 0;
         const lim = assignmentLimit(a);
         const full = n >= lim;
+        const hint = selected ? hints[zone.z] : undefined;
         const label = selected
-          ? `Assign ${selectedName} to ${ASSIGNMENT_LABEL[a]} (${n} of ${lim})${full ? ', full' : ''}`
-          : `${ZONE_NAME[zone.z]}: ${n} of ${lim} staff. Show controls.`;
+          ? `${ASSIGNMENT_LABEL[a]}: move ${selectedName} here (${n} of ${lim})${full ? ', full' : ''}${hint ? `. ${hint.text}` : ''}`
+          : `${ZONE_NAME[zone.z]}: ${n} of ${lim} staff${problemZones[zone.z] ? ', needs attention' : ''}. Open.`;
         const activate = () => {
           if (!interactive) return;
           if (selected) onZone(a);
@@ -226,7 +244,7 @@ function StoreImpl(props: Props) {
         return (
           <g key={zone.z}>
             <rect
-              className={`zone ${selected && interactive ? 'zone-armed' : interactive ? 'zone-browse' : ''} ${full ? 'zone-full' : ''} ${context === zone.z ? 'zone-context' : ''}`}
+              className={`zone ${selected && interactive ? (hint?.blocked || full ? 'zone-armed zone-full' : 'zone-armed') : interactive ? 'zone-browse' : ''} ${context === zone.z ? 'zone-context' : ''} ${highlightZones.includes(zone.z) ? 'zone-lesson' : ''}`}
               x={zone.x}
               y={zone.y}
               width={zone.w}
@@ -245,17 +263,26 @@ function StoreImpl(props: Props) {
               }}
             />
             <ZoneBadge x={zone.badge[0]} y={zone.badge[1]} n={n} lim={lim} />
+            {problemZones[zone.z] && !selected && <ProblemMark x={zone.badge[0] - 14} y={zone.badge[1] + 9} level={problemZones[zone.z]!} />}
           </g>
         );
       })}
 
-      <Notices notices={view.notices} />
+      <Notices notices={view.notices} onOpen={interactive ? (z) => onContext(z) : undefined} />
       <QueueFigures open={openTills} queue={view.queue} />
       <AisleShoppers view={view} motion={motion} />
       <WalkOuts view={view} motion={motion} />
 
+      {selected &&
+        ZONES.map((zone) => {
+          const hint = hints[zone.z];
+          if (!hint) return null;
+          return <HintPill key={zone.z} zone={zone} hint={hint} />;
+        })}
+
       {placed.map(({ s, a, x, y }) => (
         <StaffToken
+          lesson={highlightStaff.includes(s.id)}
           key={s.id}
           s={s}
           a={a}
@@ -377,7 +404,7 @@ function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
   return (
     <g aria-hidden="true">
       <RoomLabel x={404} y={26}>
-        DOCK
+        {dock > 0 ? `DOCK · ${Math.round(dock).toLocaleString('en-GB')}` : 'DOCK'}
       </RoomLabel>
       <rect x="434" y="8" width="112" height="9" fill="var(--mustard)" />
       <path d="M440 8 l6 9 M456 8 l6 9 M472 8 l6 9 M488 8 l6 9 M504 8 l6 9 M520 8 l6 9 M536 8 l6 9" stroke="var(--ink)" strokeWidth="2" opacity="0.4" />
@@ -395,9 +422,11 @@ function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
           <path d={`M${404 + (i % 5) * 34} ${(i < 5 ? 100 : 76) + 11} h30`} stroke="rgba(0,0,0,0.2)" />
         </g>
       ))}
-      <text x="486" y="140" textAnchor="middle" fontSize="11" fill={dock > 0 ? 'var(--bad)' : 'var(--muted)'} fontWeight={dock > 0 ? 700 : 400}>
-        {dock > 0 ? `Waiting: ${Math.round(dock)} items` : 'Nothing waiting'}
-      </text>
+      {dock < 1 && (
+        <text x="486" y="140" textAnchor="middle" fontSize="11" fill="var(--muted)">
+          Nothing waiting
+        </text>
+      )}
     </g>
   );
 }
@@ -582,14 +611,6 @@ function Groceries({ view }: { view: StoreView }) {
           <rect x="952" y={y - 2} width="12" height="28" rx="2" fill={promo ? 'var(--mustard)' : 'var(--wood)'} />
         </g>
       ))}
-      {promo && (
-        <g>
-          <rect x="880" y="244" width="60" height="18" rx="4" fill="var(--mustard)" />
-          <text x="910" y="257" textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--burgundy-dark)">
-            OFFER!
-          </text>
-        </g>
-      )}
       <Level x={330} y={242} w={300} units={view.shelf.ambient} cap={view.shelfCap.ambient} label="Cupboard essentials" tag={tagFor(view, 'ambient')} />
       {view.emptyDepts.includes('ambient') && <EmptyFlag x={650} y={350} />}
     </g>
@@ -769,10 +790,36 @@ function WalkOuts({ view, motion }: { view: StoreView; motion: boolean }) {
   );
 }
 
-function Notices({ notices }: { notices: ShopNotice[] }) {
+function HintPill({ zone, hint }: { zone: (typeof ZONES)[number]; hint: JobHint }) {
+  const x = zone.x + zone.w / 2;
+  const y = zone.y + zone.h / 2;
+  const w = hint.text.length * 6.6 + 24;
+  return (
+    <g className="hint-pill" aria-hidden="true" pointerEvents="none">
+      <rect x={x - w / 2} y={y - 13} width={w} height="26" rx="13" fill={hint.blocked ? 'var(--paper)' : 'var(--burgundy)'} stroke="var(--burgundy)" strokeWidth="2" />
+      <text x={x} y={y + 4.5} textAnchor="middle" fontSize="12" fontWeight="800" fill={hint.blocked ? 'var(--burgundy-dark)' : 'var(--paper)'}>
+        {hint.blocked ? '✕ ' : ''}
+        {hint.text}
+      </text>
+    </g>
+  );
+}
+
+function ProblemMark({ x, y, level }: { x: number; y: number; level: 'urgent' | 'warn' }) {
+  return (
+    <g aria-hidden="true" pointerEvents="none" className={level === 'urgent' ? 'problem-mark urgent' : 'problem-mark'}>
+      <circle cx={x} cy={y} r="10" fill={level === 'urgent' ? 'var(--bad)' : 'var(--mustard)'} stroke="var(--paper)" strokeWidth="2" />
+      <text x={x} y={y + 4.5} textAnchor="middle" fontSize="13" fontWeight="900" fill={level === 'urgent' ? '#fff' : 'var(--burgundy-dark)'}>
+        !
+      </text>
+    </g>
+  );
+}
+
+function Notices({ notices, onOpen }: { notices: ShopNotice[]; onOpen?: (z: ZoneId) => void }) {
   const stack = new Map<ZoneId, number>();
   return (
-    <g aria-hidden="true">
+    <g>
       {notices.map((n, i) => {
         const k = stack.get(n.zone) ?? 0;
         stack.set(n.zone, k + 1);
@@ -780,8 +827,35 @@ function Notices({ notices }: { notices: ShopNotice[] }) {
         const y = y0 + k * 24;
         const w = n.text.length * 6.6 + 20;
         return (
-          <g key={i} className="notice">
-            <rect x={x - w / 2} y={y - 11} width={w} height="21" rx="10.5" fill={n.tone === 'warn' ? 'var(--mustard)' : 'var(--paper)'} stroke="var(--burgundy)" strokeWidth="1.5" />
+          <g
+            key={i}
+            className={`notice notice-${n.tone} ${onOpen ? 'notice-open' : ''}`}
+            role={onOpen ? 'button' : undefined}
+            tabIndex={onOpen ? 0 : undefined}
+            aria-label={onOpen ? `${n.text}. Open ${ZONE_NAME[n.zone]}` : undefined}
+            aria-hidden={onOpen ? undefined : true}
+            onClick={onOpen ? () => onOpen(n.zone) : undefined}
+            onKeyDown={
+              onOpen
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpen(n.zone);
+                    }
+                  }
+                : undefined
+            }
+          >
+            <rect
+              x={x - w / 2}
+              y={y - 11}
+              width={w}
+              height="21"
+              rx="10.5"
+              fill={n.tone === 'warn' ? 'var(--mustard)' : n.tone === 'good' ? '#e3efe2' : n.tone === 'bad' ? '#f8e3df' : 'var(--paper)'}
+              stroke={n.tone === 'good' ? 'var(--good)' : n.tone === 'bad' ? 'var(--bad)' : 'var(--burgundy)'}
+              strokeWidth="1.5"
+            />
             <text x={x} y={y + 4} textAnchor="middle" fontSize="11.5" fontWeight="800" fill="var(--burgundy-dark)">
               {n.text}
             </text>
@@ -812,7 +886,9 @@ function StaffToken({
   selected,
   interactive,
   onClick,
+  lesson,
 }: {
+  lesson?: boolean;
   s: StaffMember;
   a: AssignmentId;
   x: number;
@@ -841,7 +917,8 @@ function StaffToken({
       }
     >
       <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
-      {selected && <ellipse cx="0" cy="0" rx="18" ry="6" fill="none" stroke="var(--mustard)" strokeWidth="3" />}
+      {lesson && !selected && <circle cx="0" cy="-30" r="38" className="lesson-ring" />}
+      {selected && <ellipse cx="0" cy="0" rx="22" ry="7" fill="none" stroke="var(--mustard)" strokeWidth="4" />}
       <g className={act === 'work' ? 'busy' : ''}>
         <g transform={a === 'tills' ? 'scale(1.2)' : 'scale(1.4)'}>
           <StaffFigure id={s.id} pose={pose} tired={tired} />

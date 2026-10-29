@@ -605,15 +605,7 @@ describe('replay data matches the simulation', () => {
   });
 });
 
-describe('first-shift tips and shop labels', () => {
-  it('walks through select, assign, run, one at a time', async () => {
-    const { activeTip } = await import('../ui/Coach');
-    expect(activeTip([], null)).toBe('select');
-    expect(activeTip([], 'mags')).toBe('assign');
-    expect(activeTip(['select'], null)).toBe('assign');
-    expect(activeTip(['select', 'assign'], null)).toBe('run');
-    expect(activeTip(['select', 'assign', 'run'], null)).toBeNull();
-  });
+describe('shop labels', () => {
   it('labels the dock and departments only when relevant', async () => {
     const { shopNotices } = await import('../ui/Coach');
     let state = startDay(SEED, recommendedSetup());
@@ -629,5 +621,46 @@ describe('first-shift tips and shop labels', () => {
     while (state.hour < 6) state = runHour(state, sensible(state)).state;
     const late = shopNotices(state, defaultPlan(state));
     expect(late.some((n) => n.zone === 'chilled' && n.text.startsWith('Expires tonight'))).toBe(shortDatedUnits(state, 'chilled') >= 1);
+  });
+});
+
+describe('short intervals', () => {
+  it('splits an hour into steps with pro-rated wages and fatigue, and settles the hour at the end', async () => {
+    const { runSteps } = await import('./engine');
+    let s = startDay(SEED, recommendedSetup());
+    const plan = defaultPlan(s);
+    plan.assignments.bev = 'break';
+    const startWages = s.ledger.wages;
+    const priyaStart = s.staff.find((x) => x.id === 'priya')!.energy;
+    const before = unitsInStore(s) + pendingUnits(s);
+    let sold = 0;
+    let wasted = 0;
+    for (let i = 0; i < 3; i++) {
+      const r = runSteps(s, plan, 2);
+      s = r.state;
+      expect(r.report.toStep - r.report.fromStep).toBe(2);
+      sold += DEPTS.reduce((t, d) => t + r.report.dept[d].sold, 0);
+      wasted += r.report.waste.reduce((t, w) => t + w.qty, 0);
+      if (i < 2) {
+        expect(s.hour).toBe(0);
+        expect(s.step).toBe((i + 1) * 2);
+      }
+    }
+    expect(s.hour).toBe(1);
+    expect(s.step).toBe(0);
+    expect(before).toBeCloseTo(sold + wasted + unitsInStore(s) + pendingUnits(s), 6);
+    expect(s.ledger.wages - startWages).toBeCloseTo(CONFIG.wagePerHour * 6, 6);
+    expect(s.staff.find((x) => x.id === 'priya')!.energy).toBeCloseTo(priyaStart + CONFIG.staff.energy.tills, 6);
+    const bev = s.staff.find((x) => x.id === 'bev')!;
+    expect(bev.breaks).toBe(1);
+    expect(bev.consecutive).toBe(0);
+  });
+  it('a short interval never runs past the end of the hour', async () => {
+    const { runSteps } = await import('./engine');
+    let s = startDay(SEED, recommendedSetup());
+    s = runSteps(s, defaultPlan(s), 4).state;
+    const r = runSteps(s, defaultPlan(s), 5);
+    expect(r.report.toStep).toBe(6);
+    expect(r.state.hour).toBe(1);
   });
 });

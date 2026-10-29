@@ -8,12 +8,14 @@ import { Opening } from './Opening';
 interface Props {
   seed: number;
   onConfirm: (s: SetupPlan) => void;
+  onLearn: () => void;
+  returning: boolean;
 }
 
-export function Setup({ seed, onConfirm }: Props) {
+export function Setup({ seed, onConfirm, onLearn, returning }: Props) {
   const [mode, setMode] = useState<'opening' | 'custom'>('opening');
   if (mode === 'custom') return <CustomSetup seed={seed} onConfirm={onConfirm} onBack={() => setMode('opening')} />;
-  return <Opening seed={seed} onStart={() => onConfirm(recommendedSetup())} onCustom={() => setMode('custom')} />;
+  return <Opening seed={seed} returning={returning} onLearn={onLearn} onStart={() => onConfirm(recommendedSetup())} onCustom={() => setMode('custom')} />;
 }
 
 const LIFE_TAG: Record<ChilledLife, string> = { short: 'Expires tonight', long: 'Keeps till Wednesday' };

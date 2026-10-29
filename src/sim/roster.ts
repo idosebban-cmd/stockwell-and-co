@@ -53,6 +53,8 @@ export function makeStaff(entry: RosterEntry, availableFrom = 0, isTemp = false)
     isTemp,
     availableFrom,
     lastAssignment: DEFAULT_ASSIGNMENTS[entry.id] ?? 'replenish:ambient',
+    stepsWorked: 0,
+    stepsRested: 0,
   };
 }
 
@@ -68,10 +70,20 @@ export const DEFAULT_ASSIGNMENTS: Record<string, AssignmentId> = {
 };
 
 export const ASSIGNMENT_LABEL: Record<AssignmentId, string> = {
-  tills: 'Tills',
-  'replenish:produce': 'Fill fruit & veg',
-  'replenish:chilled': 'Fill chilled',
-  'replenish:ambient': 'Fill cupboard',
-  receive: 'Receive deliveries',
-  break: 'Break',
+  tills: 'Serve customers',
+  'replenish:produce': 'Fill produce shelves',
+  'replenish:chilled': 'Fill chilled shelves',
+  'replenish:ambient': 'Fill grocery shelves',
+  receive: 'Unload delivery',
+  break: 'Take a break',
+};
+
+/** "Mags will unload deliveries next hour." */
+export const ASSIGNMENT_FUTURE: Record<AssignmentId, string> = {
+  tills: 'serve customers',
+  'replenish:produce': 'fill the produce shelves',
+  'replenish:chilled': 'fill the chilled shelves',
+  'replenish:ambient': 'fill the grocery shelves',
+  receive: 'unload deliveries',
+  break: 'take a break',
 };

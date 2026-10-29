@@ -50,6 +50,9 @@ export interface StaffMember {
   /** Hour from which this person is on shift. */
   availableFrom: number;
   lastAssignment: AssignmentId;
+  /** Ten-minute steps worked / rested so far in the current hour (for short intervals). */
+  stepsWorked: number;
+  stepsRested: number;
 }
 
 export interface PendingDelivery {
@@ -137,6 +140,8 @@ export interface SimState {
   scenario: Scenario;
   /** Next hour to run: 0..8. 8 = closed. */
   hour: number;
+  /** Ten-minute steps already played in the current hour (0..5). */
+  step: number;
   cash: number;
   openingInventoryValue: number;
   ledger: Ledger;
@@ -188,6 +193,8 @@ export interface DeptHourReport {
   /** Items put down in abandoned baskets. */
   abandonedItems: number;
   replenished: number;
+  /** Moved off a broken chiller into the cold room (not onto shelves). */
+  rescued: number;
   replenishCapacity: number;
   received: number;
   shelfEmptySteps: number;
@@ -227,6 +234,9 @@ export interface Reason {
 
 export interface HourReport {
   hour: number;
+  /** Steps of the hour this report covers: [fromStep, toStep). A full hour is 0..6. */
+  fromStep: number;
+  toStep: number;
   customersArrived: number;
   customersServed: number;
   customersAbandoned: number;
