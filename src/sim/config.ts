@@ -284,7 +284,157 @@ export const CONFIG = {
     },
     maxPerShift: 2,
   },
+
+  /**
+   * The seven-day campaign: Sunday to Saturday in the same shop. Provisional
+   * values, balanced with scripted players (scripts/campaign.ts); see README.
+   */
+  campaign: {
+    startCash: 1200,
+    /** The three regulars at the start; the others can be hired, in any order. */
+    startStaff: ['priya', 'kwame', 'mags'],
+    hireable: ['bev', 'tomasz', 'dougie'],
+    startDepts: ['produce', 'ambient'] as DeptId[],
+    startTills: 2,
+    /** Stock in the shop on Sunday morning. `days`: days it still keeps (null: keeps). */
+    startStock: {
+      produce: [{ qty: 150, days: 1, where: 'shelf' }],
+      chilled: [],
+      ambient: [
+        { qty: 380, days: null, where: 'shelf' },
+        { qty: 220, days: null, where: 'backroom' },
+      ],
+    } as Record<DeptId, { qty: number; days: number | null; where: 'shelf' | 'backroom' }[]>,
+    /** A modest shop: two-thirds of the Saturday shelving until it is extended. */
+    shelf: { produce: 200, chilled: 130, ambient: 400 } as Record<DeptId, number>,
+    backroom: { produce: 400, chilled: 300, ambient: 800 } as Record<DeptId, number>,
+    /** Day costs: rent and rates per day, energy and the like per trading hour. */
+    rentPerDay: 90,
+    costsPerHour: 14,
+    /** Reputation: the week's customer opinion. Each day moves it part-way to that day's satisfaction. */
+    reputation: { start: 70, pull: 0.4, pivot: 72, perPoint: 0.006, min: 0.88, max: 1.12 },
+    /** Overnight rest restores energy, but part of the day's strain carries over and lowers the next morning's energy. */
+    fatigue: { carry: 0.4, energyPerStrain: 0.8, maxEnergyLoss: 25 },
+    overnight: { produceShrink: 0.03 },
+    /** The bank lets cash go this far below zero (counted as debt); beyond it the campaign ends. */
+    overdraftLimit: 500,
+    /** Recommended orders keep this many hours of wages and costs back (the rest is paid from takings). */
+    orderReserveHours: 1,
+    /** Finish Saturday with business value this much above the start, reputation and team wellbeing at least these. */
+    objective: { growth: 1500, reputation: 65, wellbeing: 60 },
+    days: [
+      {
+        name: 'Sunday',
+        hours: 4,
+        forecast: [16, 24, 28, 22],
+        middayHour: null,
+        pricing: false,
+        actions: [],
+        profitTarget: 20,
+        intro: 'First day in charge. Keep a till open, keep the shelves filled from the stockroom, and give everyone a break.',
+        events: [],
+      },
+      {
+        name: 'Monday',
+        hours: 5,
+        forecast: [20, 28, 34, 32, 24],
+        middayHour: 2,
+        pricing: false,
+        actions: ['emergency'],
+        profitTarget: 60,
+        intro: 'New today: a midday delivery arrives at 11:00. Someone has to unload it on the dock before the shelves can be filled from it.',
+        events: [],
+      },
+      {
+        name: 'Tuesday',
+        hours: 6,
+        forecast: [22, 30, 38, 40, 32, 26],
+        middayHour: 3,
+        pricing: true,
+        actions: ['emergency', 'markdown', 'promotion'],
+        profitTarget: 110,
+        intro: 'New today: you can set each department’s price. Click a department, then Change prices.',
+        events: [],
+      },
+      {
+        name: 'Wednesday',
+        hours: 6,
+        forecast: [40, 48, 40, 32, 26, 24],
+        middayHour: 3,
+        pricing: true,
+        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
+        profitTarget: 140,
+        intro: 'Market day: busiest first thing, quieter after lunch.',
+        events: [{ kind: 'delayedDelivery', hour: 3, warnAt: 1 }],
+      },
+      {
+        name: 'Thursday',
+        hours: 7,
+        forecast: [24, 30, 36, 42, 36, 46, 54],
+        middayHour: 3,
+        pricing: true,
+        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
+        profitTarget: 170,
+        intro: 'Late opening: the after-work crowd arrives from 14:00.',
+        events: [{ kind: 'rush', hour: 6, warnAt: 4 }],
+      },
+      {
+        name: 'Friday',
+        hours: 7,
+        forecast: [30, 40, 50, 58, 52, 48, 46],
+        middayHour: 3,
+        pricing: true,
+        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
+        profitTarget: 220,
+        intro: 'Payday: steady and busy all day.',
+        /** Only if the shop has chilled cabinets without the refrigeration upgrade; announced at opening. */
+        events: [{ kind: 'fridgeFault', hour: 2, warnAt: 0 }],
+      },
+      {
+        name: 'Saturday',
+        hours: 8,
+        forecast: [35, 48, 62, 75, 72, 58, 50, 40],
+        middayHour: 3,
+        pricing: true,
+        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
+        profitTarget: 320,
+        intro: 'Saturday: the busiest day of the week, and the end of your first week.',
+        events: [{ kind: 'rush', hour: 5, warnAt: 3 }],
+      },
+    ] as CampaignDayConfig[],
+    /**
+     * Permanent improvements. `cost` is paid between days. Equipment counts in
+     * business value at purchase cost; a hire's induction fee is an expense.
+     * `perDay` is a running cost added to that day's costs.
+     */
+    upgrades: {
+      till3: { name: 'Third till', cost: 450, perDay: 0, from: 0, equipment: true },
+      shelfProduce: { name: 'More fruit & veg display', cost: 280, perDay: 0, from: 0, equipment: true, extra: 100 },
+      shelfAmbient: { name: 'Third grocery aisle', cost: 320, perDay: 0, from: 0, equipment: true, extra: 200 },
+      chilled: { name: 'Chilled department', cost: 850, perDay: 18, from: 2, equipment: true },
+      shelfChilled: { name: 'Two more chilled cabinets', cost: 350, perDay: 6, from: 2, equipment: true, extra: 130 },
+      fridge: { name: 'Better refrigeration', cost: 300, perDay: 0, from: 2, equipment: true },
+      hire: { name: 'Hire', cost: 60, perDay: 0, from: 0, equipment: false },
+    },
+    /** Better refrigeration: no cabinet faults, and chilled on the dock spoils this much as fast. */
+    fridgeDockSpoilMult: 0.5,
+  },
 } as const;
+
+export interface CampaignDayConfig {
+  name: string;
+  hours: number;
+  /** Customers per hour before reputation. */
+  forecast: number[];
+  middayHour: number | null;
+  pricing: boolean;
+  actions: ('markdown' | 'promotion' | 'emergency' | 'temp' | 'repair')[];
+  /** The day's objective: operating profit of at least this. */
+  profitTarget: number;
+  /** One line shown at opening; introduces whatever is new today. */
+  intro: string;
+  events: { kind: 'rush' | 'delayedDelivery' | 'fridgeFault'; hour: number; warnAt: number }[];
+}
 
 export interface DeptConfig {
   name: string;

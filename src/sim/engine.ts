@@ -163,7 +163,7 @@ export function checkSetup(setup: SetupPlan, forecast: readonly number[] = C.dem
     cost += c;
     const space = Math.max(0, ctx.shelfCap[d] + ctx.backroomCap[d] - basis.carried[d]);
     const morningFits = m <= space;
-    if (!morningFits) errors.push(`${cfg.name}: the morning delivery doesn't fit (room for ${space}).`);
+    if (!morningFits) errors.push(`${cfg.name}: the morning delivery doesn't fit (room for ${Math.floor(space)}).`);
     if (md > C.openingOrder.maxMidday) errors.push(`${cfg.name}: the midday lorry takes at most ${C.openingOrder.maxMidday}.`);
     if (!Number.isFinite(o.morning) || !Number.isFinite(o.midday)) errors.push(`${cfg.name}: enter a number.`);
     perDept[d] = { cost: c, morningFits, space, midday: middayRoomEstimate(setup, forecast, d, basis) };
@@ -204,8 +204,10 @@ export interface ShiftInput {
   ctx: DayContext;
   /** Cash before the day's order is paid for. */
   cash: number;
+  /** How far an order may take cash below zero (campaign overdraft). */
+  overdraft?: number;
   /** Stock already in the shop, by where it sits. */
-  carried: Record<DeptId, { where: 'shelf' | 'backroom'; batch: Batch }[]>;
+  carried: Record<DeptId, { where: 'shelf' | 'backroom' | 'dock'; batch: Batch }[]>;
   staff: StaffMember[];
   setup: SetupPlan;
   announcements: string[];
@@ -215,17 +217,18 @@ export interface ShiftInput {
 export function startShift(input: ShiftInput): SimState {
   const { seed, scenario, ctx, setup } = input;
   const carriedQtys = perDept((d) => input.carried[d].reduce((t, c) => t + c.batch.qty, 0));
-  const check = checkSetup(setup, scenario.forecast, { cash: input.cash, carried: carriedQtys, ctx });
+  const check = checkSetup(setup, scenario.forecast, { cash: input.cash + (input.overdraft ?? 0), carried: carriedQtys, ctx });
   if (check.errors.length) throw new Error(check.errors.join(' '));
   const stock = {} as SimState['stock'];
   let openingInventoryValue = 0;
   for (const d of DEPTS) {
     const shelf: Batch[] = [];
     const backroom: Batch[] = [];
+    const dock: Batch[] = [];
     for (const cb of input.carried[d]) {
       const b: Batch = { ...cb.batch };
       openingInventoryValue += b.qty * b.unitCost;
-      S.add(cb.where === 'shelf' ? shelf : backroom, [b]);
+      S.add(cb.where === 'shelf' ? shelf : cb.where === 'dock' ? dock : backroom, [b]);
     }
     // Night crew puts the morning delivery away: shelves first, then stockroom.
     const morning = Math.round(setup.orders[d].morning);
@@ -233,7 +236,7 @@ export function startShift(input: ShiftInput): SimState {
     if (morning > 0) S.add(backroom, datedBatches(d, morning, deliveryUnitCost(d, life), life, ctx.weekday));
     const space = Math.max(0, ctx.shelfCap[d] - S.total(shelf));
     S.add(shelf, S.take(backroom, space));
-    stock[d] = { shelf, backroom, dock: [] };
+    stock[d] = { shelf, backroom, dock };
   }
   const state: SimState = {
     seed,
@@ -274,6 +277,7 @@ export function startShift(input: ShiftInput): SimState {
     }
   }
   prepareHour(state, []);
+  state.announcements = [...input.announcements, ...state.announcements];
   return state;
 }
 
@@ -1131,11 +1135,39 @@ function closeDay(state: SimState, report: HourReport, waste: WasteLine[]): void
     state.queue.customers = 0;
   }
   for (const d of DEPTS) expire(state, d, close, waste, notes);
+  if (state.ctx.mode === 'campaign') closeForTheNight(state, waste, notes);
   for (const s of state.staff) {
     if (!s.isTemp && s.breaks === 0 && s.hoursWorked >= C.wellbeing.hoursBeforeBreakNeeded) s.strain += C.wellbeing.noBreakAllDayStrain;
   }
   state.announcements = notes;
   report.messages.push(...notes);
+}
+
+/**
+ * Campaign closing, before the next day: the night crew puts dock stock away
+ * where there is room (chilled that can't go in the cold room is binned; the
+ * rest waits on the dock), stock past its date before the next opening is
+ * binned, and fruit & veg ages a little overnight. Everything else keeps.
+ */
+function closeForTheNight(state: SimState, waste: WasteLine[], notes: string[]): void {
+  for (const d of DEPTS) {
+    const st = state.stock[d];
+    const space = Math.max(0, backroomCapacity(state, d) - S.total(st.backroom));
+    S.add(st.backroom, S.take(st.dock, space));
+    if (d === 'chilled' && S.total(st.dock) > 1e-9) {
+      const warm = S.takeShare(st.dock, 1);
+      writeOff(state, waste, d, S.total(warm), S.value(warm), 'dock');
+      notes.push(`${Math.round(S.total(warm))} chilled items had no room in the cold room overnight and were binned.`);
+    }
+  }
+  for (const d of DEPTS) expire(state, d, C.calendar.hoursPerDay, waste, notes);
+  const shrink = C.campaign.overnight.produceShrink;
+  for (const d of DEPTS) {
+    if (!C.departments[d].perishable || d === 'chilled') continue;
+    const st = state.stock[d];
+    const lost = [...S.takeShare(st.shelf, shrink), ...S.takeShare(st.backroom, shrink)];
+    writeOff(state, waste, d, S.total(lost), S.value(lost), 'shrink');
+  }
 }
 
 /** Takings and cost of goods for items paid for. Short-dated items sell at the sticker price during a markdown. */
