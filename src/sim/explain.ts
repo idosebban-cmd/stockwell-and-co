@@ -66,7 +66,12 @@ export function previewWarnings(state: SimState, plan: HourPlan): Note[] {
 
   for (const s of report.staff) {
     if (s.utilisation !== null && s.utilisation < 0.3 && s.assignment !== 'tills') {
-      const what = s.assignment === 'receive' ? 'there is little on the dock to receive' : 'those shelves are already well stocked';
+      let what = 'there is little on the dock to receive';
+      if (s.assignment.startsWith('replenish:')) {
+        const d = s.assignment.split(':')[1] as DeptId;
+        const u = deptUnits(state, d);
+        what = u.backroom < 1 && u.dock > 0 ? 'the stock is still on the dock; someone needs to receive it first' : u.backroom < 1 ? 'the stockroom is empty' : 'those shelves are already well stocked';
+      } else if (DEPTS.some((d) => deptUnits(state, d).dock > 0)) what = 'the stockroom is too full to take the delivery';
       notes.push({ kind: 'idle', level: 'info', text: `${s.name} may have little to do: ${what}.` });
     }
   }
@@ -184,8 +189,21 @@ export function explainHour(report: HourReport): Note[] {
 
   const idle = report.staff.filter((s) => s.utilisation !== null && s.utilisation < 0.3 && s.assignment !== 'tills');
   for (const s of idle) {
-    const what = s.assignment === 'receive' ? 'there was little on the dock' : 'the shelves were already full or the stockroom was empty';
-    notes.push({ kind: 'idle', level: 'info', text: `${s.name} (${ASSIGNMENT_LABEL[s.assignment].toLowerCase()}) had little to do: ${what}.` });
+    let what = 'there was little on the dock';
+    if (s.assignment === 'receive') {
+      const blocked = DEPTS.some((d) => report.dept[d].dockEnd > 1);
+      if (blocked) what = 'the stockroom was full, so the delivery had nowhere to go';
+    } else if (s.assignment.startsWith('replenish:')) {
+      const d = s.assignment.split(':')[1] as DeptId;
+      const r = report.dept[d];
+      what =
+        r.backroomEnd < 1 && r.dockEnd > 1
+          ? `the stockroom was empty and ${Math.round(r.dockEnd)} items were still on the dock, unreceived`
+          : r.backroomEnd < 1
+            ? 'the stockroom had run out'
+            : 'the shelves were already full';
+    }
+    notes.push({ kind: 'idle', level: s.assignment === 'receive' ? 'info' : 'warn', text: `${s.name} (${ASSIGNMENT_LABEL[s.assignment].toLowerCase()}) had little to do: ${what}.` });
   }
   const slow = report.staff.filter((s) => s.assignment !== 'break' && s.productivity < 0.9 && s.id !== 'temp');
   if (slow.length)

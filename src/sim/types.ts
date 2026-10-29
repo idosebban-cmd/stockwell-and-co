@@ -162,6 +162,7 @@ export interface StepSnapshot {
   served: number;
   abandoned: number;
   emptyDepts: DeptId[];
+  fridgeFault: boolean;
 }
 
 export interface DeptHourReport {

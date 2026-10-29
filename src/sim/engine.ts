@@ -779,6 +779,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
       served: s,
       abandoned: left,
       emptyDepts: empty,
+      fridgeFault: state.fridge.status === 'fault',
     });
   }
 
