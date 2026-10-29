@@ -1,4 +1,4 @@
-import type { DeptId, PriceTier } from './config';
+import type { ChilledLife, DeptId, PriceTier } from './config';
 
 /** A quantity of one aggregate product with one cost and one date. */
 export interface Batch {
@@ -59,6 +59,8 @@ export interface PendingDelivery {
   unitCost: number;
   arrivesAt: number;
   kind: 'midday' | 'emergency';
+  /** Shelf life for chilled deliveries. */
+  life?: ChilledLife;
   /** Hour it was originally due (for delays). */
   originalHour: number;
 }
@@ -102,6 +104,8 @@ export type ActionRequest =
 
 export interface SetupPlan {
   orders: Record<DeptId, { morning: number; midday: number }>;
+  /** Shelf life bought for each chilled delivery. */
+  chilledLife: Record<'morning' | 'midday', ChilledLife>;
   pricing: Record<DeptId, PriceTier>;
 }
 
@@ -163,6 +167,12 @@ export interface StepSnapshot {
   abandoned: number;
   emptyDepts: DeptId[];
   fridgeFault: boolean;
+  /** Items moved by each department's fillers this step (to shelf, or rescued to the cold room). */
+  moved: Record<DeptId, number>;
+  /** Items received from the dock this step. */
+  received: number;
+  /** Customers the open tills could serve this step. */
+  tillCapacity: number;
 }
 
 export interface DeptHourReport {

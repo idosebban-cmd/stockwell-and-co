@@ -32,9 +32,9 @@ The build is static (`dist/`, relative paths) and can be opened from any static 
 
 ## How to play
 
-1. **Opening setup.** Order the morning delivery (already put away) and the midday delivery (lands on the dock at 12:00), and pick value, standard or premium prices per department. The screen shows cost, cash left and shelf/stockroom space. "Use the recommended order" gives a sensible start.
-2. **Each hour.** Read the Tannoy (events) and the shift manager's notes (directional warnings). Give everyone a job: tills, fill one department, receive deliveries or take a break. Use each person's drop-down, or select their token and click a zone in the shop. Add prices and actions if you need them. Everything is reversible until you press **Run** (or R).
-3. **Replay and results.** A short replay shows the hour's recorded outcome (skip it any time). Then you get an explanation that separates missing stock, empty shelves with stock out back, and checkout bottlenecks.
+1. **Opening.** The first screen states the objective, shows the forecast and offers **Start with recommended stock** or **Customise opening order**. Customising lets you set the morning delivery (already put away) and the midday delivery (lands on the dock at 12:00), choose short-dated or longer-life chilled for each delivery, and pick value, standard or premium prices. It shows cost, cash left, shelf/stockroom space and an estimate of the room left at 12:00 after forecast sales.
+2. **Each hour.** Read the Tannoy (events) and the shift manager's notes (directional warnings). Give everyone a job: tills, fill one department, receive deliveries or take a break. Use each person's drop-down, or click a staff character in the shop and then the place they should work. Click a department, the tills, the dock or the break room to open its controls (stock and dates, price tier, markdown, promotion, emergency order, temp, chiller engineer). Everything is reversible until you press **Run** (or R).
+3. **Replay and results.** A short replay shows the hour's recorded outcome (skip it any time): shoppers with baskets arriving at the departments, queues building in the till lanes, walk-outs and abandoned baskets, shelves emptying, and staff carrying stock, scanning or standing idle. A side list says what each person is doing and why anyone is idle. Then you get an explanation that separates missing stock, empty shelves with stock out back, and checkout bottlenecks.
 4. **Closing.** Accounts, cash and remaining stock, targets, the three biggest effects on profit, and missed opportunities drawn from the day's data. **Retry same Saturday** replays identical customers and events; **New Saturday** uses a new seed.
 
 **Win** with operating profit of £800 or more, customer satisfaction of 70 or more and staff wellbeing of 60 or more.
@@ -42,7 +42,8 @@ The build is static (`dist/`, relative paths) and can be opened from any static 
 ## Design in brief
 
 - **Stock** is held as dated batches in three places per department: shelf, stockroom and dock. Customers can only buy from shelves. Shelves only refill from the stockroom, by staff assigned to that department. Deliveries need receiving before they reach the stockroom.
-- **Perishables.** Friday's produce goes past its best at 13:00; produce on display bruises slowly. 60% of each chilled delivery is "use by Sunday" and the shop is closed on Sundays, so it is binned at close; the rest carries over. Chilled stock on the dock spoils quickly. Cupboard stock keeps. Rotation is good but not perfect, so some fresher stock sells first.
+- **Perishables.** Friday's produce goes past its best at 13:00; produce on display bruises slowly. Chilled is bought per delivery as short-dated ("use by Sunday", £1.35, binned at close if unsold because the shop is closed on Sundays) or longer-life ("use by Wednesday", £1.55, keeps its value). The recommended order buys short-dated in the morning and longer-life at midday. Emergency chilled is longer-life. Chilled stock on the dock spoils quickly. Cupboard stock keeps. Rotation is good but not perfect, so some fresher stock sells first.
+- **Midday room estimate.** The order screen estimates the space at 12:00 from forecast sales before the lorry arrives (at the chosen prices, assuming shelves are kept filled), and says roughly when any overflow will have cleared from the dock. It ignores the hidden demand variation, so it is labelled as an estimate.
 - **Customers and queues.** Each hour is simulated in six ten-minute steps. Shoppers pick from the shelves and join the queue. When the expected wait exceeds their patience, a share leave; their baskets go back on the shelves (some chilled is binned). The queue carries over between hours.
 - **Money.** Stock purchases spend cash and create inventory. A sale recognises revenue and the cost of the goods sold; waste writes off the cost of what expired. Wages and other costs reduce profit. Unsold stock keeps its value at cost. Tests check that no item or pound is created, lost or counted twice.
 - **Staff.** Energy falls while working and recovers on a break. Below 50, people slow down. Wellbeing is based on strain accumulated across the shift (low energy, long stretches without a break, no break at all), so resting everyone at the end does not undo the day. Specialities are modest (+15%) and don't decide the allocation.
@@ -66,7 +67,9 @@ src/sim/            Pure TypeScript simulation (no DOM, no timers)
   save.ts           localStorage autosave and settings, failure-tolerant
   bots.ts           Scripted strategies for tests and balance runs
   sim.test.ts       Vitest suite
-src/ui/             React components (store SVG, panels, setup, closing, dialogs)
+src/ui/             React components: Store.tsx (illustrated shop), art/Characters.tsx (staff and
+                    shoppers), PlanPanel.tsx (staff, context card, prices and actions), activity.ts
+                    (staff activity from replay snapshots), setup, results, closing, dialogs
 src/App.tsx         Phases, replay timer, keyboard shortcuts
 scripts/            Balance and playtest scripts (run with vite-node)
 ```
@@ -77,10 +80,10 @@ All in `src/sim/config.ts`. Highlights:
 
 | Parameter | Value |
 |---|---|
-| Starting cash | £3,600 (recommended order costs about £3,250) |
+| Starting cash | £3,600 (recommended order costs about £3,240) |
 | Forecast customers per hour | 35, 48, 62, 75, 72, 58, 50, 40 (±8% hidden variation) |
 | Basket per customer | 3.5 fruit & veg, 2.5 chilled, 4 cupboard items |
-| Price / unit cost | fruit & veg £0.95 / £0.52 · chilled £2.40 / £1.45 · cupboard £1.35 / £0.82 |
+| Price / unit cost | fruit & veg £0.95 / £0.52 · chilled £2.40 / £1.35 short-dated or £1.55 longer-life · cupboard £1.35 / £0.82 |
 | Value / premium | ×0.90 price, ×1.18 demand, +satisfaction / ×1.10 price, ×0.86 demand, −satisfaction |
 | Shelf / stockroom space | 300 / 600 · 260 / 450 · 600 / 1,200 |
 | Staff rates per hour | tills 30 customers · fill 280 / 260 / 400 items · receive 500 items |
@@ -90,7 +93,7 @@ All in `src/sim/config.ts`. Highlights:
 | Wages and overheads | £12.60/hour each; £680/day overheads |
 | Targets | profit £800 · satisfaction 70 · wellbeing 60 |
 
-With these values the scripted "sensible" manager wins the curated Saturday (about £1,090, satisfaction 79, wellbeing 90) and makes about £760–1,270 on generated Saturdays, winning roughly three in four (16 of 20 in the test sample; the misses are within £45 of the profit target or narrowly under on satisfaction). Keeping one till, never refilling shelves, never taking breaks, or accepting the default plan every hour all lose (see `npm run balance` and the balance tests).
+With these values the scripted "sensible" manager wins the curated Saturday (about £1,100, satisfaction 79, wellbeing 90) and 19 of 20 generated Saturdays in the test sample. That is probably slightly generous for a real first-time player, and is the first thing to check in playtesting. Keeping one till, never refilling shelves, never taking breaks, or accepting the default plan every hour all lose (see `npm run balance` and the balance tests).
 
 ## Accessibility
 
@@ -102,14 +105,22 @@ With these values the scripted "sensible" manager wins the curated Saturday (abo
 ## Known limitations
 
 - Each department is one aggregate product; there is no individual product management.
-- The queue and shopping model is a deterministic flow model of fractional customers. It is consistent, but it doesn't simulate individual shoppers, and the customer dots in the replay are representative, not one per person.
-- Dragging staff tokens is not implemented; click-to-assign and the drop-downs cover everything.
+- The queue and shopping model is a deterministic flow model of fractional customers. It doesn't simulate individual shoppers. In the replay, **queue figures are one per queuing customer** (split evenly across open tills, up to 20 per lane), shelf stock, stockroom crates, the dock, empty-shelf flags, walk-outs and staff activity come from the recorded ten-minute steps; the **shoppers in the aisles are representative** (about one figure per 1.2 arrivals that step, spread by basket share) and their walking paths are decorative.
+- Dragging staff is not implemented; click-to-assign and the drop-downs cover everything.
 - Balance has been tuned with scripted strategies, not yet with human players. The generated Saturdays (New Saturday) vary demand and events within limits, but haven't been hand-checked as much as the curated one.
 - Desktop-first. The layout stacks on narrow screens but isn't designed for phones.
-- A save from a future version that changes the rules is discarded rather than migrated.
+- Saves from an incompatible version (including those from before the chilled shelf-life choice) are discarded rather than migrated.
 
 ## Playtest questions
 
 The central question: **does changing a staffing or commercial decision create an understandable, interesting consequence elsewhere in the shop?** For example, `npm run consequence` takes the 12:00 hour of the first Saturday and moves one person from tills to receiving. The preview warns "Checkout capacity is likely to fall short", and the result shows 8 walk-outs and about £110 of abandoned shopping, where the original plan had none.
 
 Also worth watching for: whether the midday delivery and receiving make sense without the tip; whether breaks feel worth their cost; whether the markdown and chiller decisions feel like real choices.
+
+## Status: implemented vs provisional
+
+Implemented and covered by tests: the simulation (stock, perishables, queues, money, staff, events, interventions), the chilled shelf-life choice, the midday room estimate, determinism, save/load, and the reconciliation between replay snapshots and hour results (served, walk-outs, received, shelf levels, idle staff only when they moved nothing).
+
+Implemented, checked by screenshots at 1366×768 and 1280×800 but not by automated tests: the illustrated shop, characters, context cards, opening screen and replay animation.
+
+Provisional: all balance values in `src/sim/config.ts` (tuned with scripted strategies, not people); the art is simple SVG and character sizes are small at laptop width; the representative aisle shoppers.

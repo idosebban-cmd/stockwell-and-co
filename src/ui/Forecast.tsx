@@ -8,19 +8,21 @@ interface Props {
   knownUpTo: number;
   reports?: HourReport[];
   compact?: boolean;
+  /** Wide, short version shown under the shop. */
+  strip?: boolean;
 }
 
 /** Bar chart of expected customers per hour, with actual arrivals for hours already played. */
-export function Forecast({ scenario, currentHour, knownUpTo, reports = [], compact }: Props) {
+export function Forecast({ scenario, currentHour, knownUpTo, reports = [], compact, strip }: Props) {
   const rushes = new Set(scenario.events.filter((e) => e.kind === 'rush' && e.warnAt <= knownUpTo).map((e) => e.hour));
   const expected = scenario.forecast.map((f, h) => f * (rushes.has(h) ? CONFIG.events.rush.customerMult : 1));
   const max = Math.max(...expected, ...reports.map((r) => r.customersArrived)) * 1.1;
-  const w = compact ? 300 : 420;
-  const h = compact ? 92 : 130;
+  const w = strip ? 640 : compact ? 300 : 420;
+  const h = strip ? 78 : compact ? 92 : 130;
   const bw = w / CONFIG.hours;
   const ch = h - 30;
   return (
-    <figure className="forecast">
+    <figure className={`forecast ${strip ? 'forecast-strip' : ''}`}>
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`Expected customers per hour: ${expected.map((e, i) => `${hourLabel(i)} about ${Math.round(e)}`).join(', ')}`}>
         {expected.map((e, i) => {
           const bh = (e / max) * ch;
@@ -49,7 +51,7 @@ export function Forecast({ scenario, currentHour, knownUpTo, reports = [], compa
         })}
       </svg>
       <figcaption>
-        Expected customers per hour{rushes.size ? ' (dark red: announced rush)' : ''}
+        {strip ? 'Forecast customers per hour' : 'Expected customers per hour'}{rushes.size ? ' (dark red: announced rush)' : ''}
         {reports.length ? '; thin bars: actual' : ''}. Real footfall varies a little.
       </figcaption>
     </figure>

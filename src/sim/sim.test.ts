@@ -4,6 +4,7 @@ import {
   carriedQty,
   checkSetup,
   defaultPlan,
+  middayRoomEstimate,
   describeAction,
   inventoryValue,
   operatingProfit,
@@ -22,6 +23,7 @@ import { clearSave, loadGame, saveGame, SAVE_KEY, type StorageLike } from './sav
 import { summarise } from './summary';
 import { explainHour, previewWarnings } from './explain';
 import type { HourPlan, SimState } from './types';
+import { stepActivity } from '../ui/activity';
 
 const SEED = CURATED_SEED;
 
@@ -77,6 +79,41 @@ describe('opening setup', () => {
     const c = checkSetup(recommendedSetup());
     expect(state.cash).toBeCloseTo(CONFIG.startingCash - c.cost);
     expect(operatingProfit(state)).toBe(0);
+  });
+});
+
+describe('chilled shelf life and midday room', () => {
+  it('lets the player choose short-dated (cheaper) or longer-life chilled per delivery', () => {
+    const short = recommendedSetup();
+    short.chilledLife = { morning: 'short', midday: 'short' };
+    const long = recommendedSetup();
+    long.chilledLife = { morning: 'long', midday: 'long' };
+    expect(checkSetup(short).cost).toBeLessThan(checkSetup(long).cost);
+    const qty = long.orders.chilled.morning + long.orders.chilled.midday;
+    expect(checkSetup(long).cost - checkSetup(short).cost).toBeCloseTo(qty * (CONFIG.chilledLife.long.unitCost - CONFIG.chilledLife.short.unitCost), 6);
+    const s = startDay(SEED, short);
+    const labels = [...s.stock.chilled.shelf, ...s.stock.chilled.backroom].map((b) => b.label);
+    expect(labels).not.toContain(CONFIG.chilledLife.long.label);
+    expect(s.deliveries.find((d) => d.dept === 'chilled')!.life).toBe('short');
+  });
+  it('the midday room estimate allows for forecast sales before 12:00', () => {
+    const setup = recommendedSetup();
+    const est = middayRoomEstimate(setup, CONFIG.demand.forecast, 'produce');
+    const cfg = CONFIG.departments.produce;
+    const opening = carriedQty('produce') + setup.orders.produce.morning;
+    const sales = CONFIG.demand.forecast.slice(0, CONFIG.openingOrder.middayHour).reduce((t, x) => t + x, 0) * cfg.basket;
+    expect(est.expectedLeft).toBeCloseTo(opening - sales, 6);
+    expect(est.room).toBeCloseTo(cfg.shelfCapacity + cfg.backroomCapacity - (opening - sales), 6);
+    // Any overflow in the recommended order clears within the first afternoon hour.
+    for (const d of DEPTS) {
+      const e = middayRoomEstimate(setup, CONFIG.demand.forecast, d);
+      expect(e.clearsBy).not.toBeNull();
+      expect(e.clearsBy!).toBeLessThanOrEqual(CONFIG.openingOrder.middayHour + 1);
+    }
+    setup.orders.produce.midday = 1500;
+    const big = middayRoomEstimate(setup, CONFIG.demand.forecast, 'produce');
+    expect(big.overflow).toBeGreaterThan(500);
+    expect(big.clearsBy!).toBeGreaterThan(CONFIG.openingOrder.middayHour + 1);
   });
 });
 
@@ -231,6 +268,7 @@ describe('expiry and perishables', () => {
   });
   it('short-dated chilled is binned at close; long-dated chilled carries over', () => {
     const setup = recommendedSetup();
+    setup.chilledLife = { morning: 'long', midday: 'short' };
     setup.orders.chilled.midday = 1000; // deliberately too much
     setup.orders.produce.midday = 300;
     setup.orders.ambient.morning = 700;
@@ -532,5 +570,36 @@ describe('balance: complete shifts', () => {
     };
     const { state } = playShift(SEED, slip);
     expect(won(state)).toBe(true);
+  });
+});
+
+describe('replay data matches the simulation', () => {
+  it('step snapshots add up to the hour report, and idle staff are idle for a recorded reason', () => {
+    const { reports } = playShift(SEED, passive);
+    let sawIdleFiller = false;
+    for (const r of reports.slice(0, -1)) {
+      const served = r.steps.reduce((t, s) => t + s.served, 0);
+      expect(served).toBeCloseTo(r.customersServed, 6);
+      expect(r.steps.reduce((t, s) => t + s.abandoned, 0)).toBeCloseTo(r.customersAbandoned, 6);
+      for (const d of DEPTS) {
+        const received = r.steps.reduce((t, s) => t + s.received, 0);
+        expect(received).toBeCloseTo(DEPTS.reduce((t, x) => t + r.dept[x].received, 0), 6);
+        expect(r.steps.reduce((t, s) => t + s.moved[d], 0)).toBeGreaterThanOrEqual(r.dept[d].replenished - 1e-6);
+        expect(r.steps[r.steps.length - 1].shelf[d]).toBeCloseTo(r.dept[d].shelfEnd, 6);
+      }
+      r.steps.forEach((s, k) => {
+        for (const a of stepActivity(r, k)) {
+          const job = r.staff.find((x) => x.id === a.id)!.assignment;
+          if (job.startsWith('replenish:') && a.activity === 'idle') {
+            const d = job.split(':')[1] as (typeof DEPTS)[number];
+            expect(s.moved[d]).toBeLessThanOrEqual(0.5);
+            sawIdleFiller = true;
+          }
+          if (job === 'tills' && a.activity === 'work') expect(s.served).toBeGreaterThan(0);
+        }
+      });
+    }
+    // The passive plan leaves fillers with nothing to move once the stockroom runs dry.
+    expect(sawIdleFiller).toBe(true);
   });
 });

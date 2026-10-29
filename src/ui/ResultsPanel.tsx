@@ -3,6 +3,7 @@ import { money } from '../sim/engine';
 import { explainHour } from '../sim/explain';
 import { ASSIGNMENT_LABEL } from '../sim/roster';
 import type { HourReport } from '../sim/types';
+import { stepActivity } from './activity';
 
 const KIND_LABEL: Record<string, string> = {
   checkout: 'Checkout',
@@ -167,6 +168,15 @@ export function ReplayPanel({ report, step, onSkip }: { report: HourReport; step
         <li>Queue: {Math.round(s?.queue ?? 0)}</li>
         <li className={left >= 1 ? 'bad' : ''}>Walked out: {Math.round(left)}</li>
         {s?.emptyDepts.length ? <li className="bad">Empty: {s.emptyDepts.map((d) => deptName(d)).join(', ')}</li> : null}
+      </ul>
+      <h3>Staff right now</h3>
+      <ul className="activity-list">
+        {stepActivity(report, step).map((a) => (
+          <li key={a.id} className={a.activity === 'idle' ? 'idle' : ''}>
+            <strong>{a.name}</strong> — {a.why}
+            {a.activity === 'idle' && <span className="sr-only"> (idle)</span>}
+          </li>
+        ))}
       </ul>
       <p className="tiny muted">The replay shows results already calculated. Its speed never changes the outcome.</p>
       <button type="button" className="btn-primary" onClick={onSkip} autoFocus>

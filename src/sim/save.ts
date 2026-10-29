@@ -126,7 +126,9 @@ function isSetup(s: unknown): s is SetupPlan {
         typeof x.orders?.[d]?.morning === 'number' &&
         typeof x.orders?.[d]?.midday === 'number' &&
         PRICE_TIERS.includes(x.pricing?.[d]),
-    )
+    ) &&
+    ['short', 'long'].includes(x.chilledLife?.morning) &&
+    ['short', 'long'].includes(x.chilledLife?.midday)
   );
 }
 

@@ -6,7 +6,7 @@
  *       runHour(state, plan)   -> { state, report } (repeat eight times)
  * After the eighth hour the state is closed (state.hour === 8).
  */
-import { CONFIG, DEPTS, deptName, hourLabel, type DeptId, type PriceTier } from './config';
+import { CONFIG, DEPTS, deptName, hourLabel, type ChilledLife, type DeptId, type PriceTier } from './config';
 import { makeScenario } from './scenario';
 import { makeStaff, ROSTER, TEMP_ENTRY } from './roster';
 import * as S from './stock';
@@ -41,8 +41,48 @@ export function recommendedSetup(): SetupPlan {
       chilled: { ...o.chilled },
       ambient: { ...o.ambient },
     },
+    chilledLife: { ...C.openingOrder.recommendedChilledLife },
     pricing: { produce: 'standard', chilled: 'standard', ambient: 'standard' },
   };
+}
+
+/** Unit cost of a delivery; chilled depends on the shelf life chosen. */
+export function deliveryUnitCost(dept: DeptId, life?: ChilledLife): number {
+  if (dept === 'chilled') return C.chilledLife[life ?? 'long'].unitCost;
+  return C.departments[dept].unitCost;
+}
+
+export interface MiddayRoom {
+  /** Forecast stock left in the shop at 12:00, at the chosen prices. */
+  expectedLeft: number;
+  /** Shelf + stockroom space that leaves, assuming shelves are kept filled. */
+  room: number;
+  /** Items likely to wait on the dock until space frees up. */
+  overflow: number;
+  /** Hour (from opening) by which forecast sales should make room for the overflow; null if not today. */
+  clearsBy: number | null;
+}
+
+/**
+ * Estimates the space for the midday delivery, allowing for the sales the
+ * forecast expects before it arrives. It ignores the hidden variation and
+ * any shelf-filling shortfalls, so it is an estimate, not a promise.
+ */
+export function middayRoomEstimate(setup: SetupPlan, forecast: readonly number[], dept: DeptId): MiddayRoom {
+  const cfg = C.departments[dept];
+  let sales = 0;
+  for (let h = 0; h < C.openingOrder.middayHour; h++) sales += forecast[h] * cfg.basket * C.pricing[setup.pricing[dept]].demandMult;
+  const opening = carriedQty(dept) + Math.max(0, Math.round(setup.orders[dept].morning));
+  const expectedLeft = Math.max(0, opening - sales);
+  const room = Math.max(0, cfg.shelfCapacity + cfg.backroomCapacity - expectedLeft);
+  const overflow = Math.max(0, Math.round(setup.orders[dept].midday) - room);
+  let clearsBy: number | null = overflow > 0 ? null : C.openingOrder.middayHour;
+  let later = 0;
+  for (let h = C.openingOrder.middayHour; h < C.hours && clearsBy === null; h++) {
+    later += forecast[h] * cfg.basket * C.pricing[setup.pricing[dept]].demandMult;
+    if (later >= overflow) clearsBy = h + 1;
+  }
+  return { expectedLeft, room, overflow, clearsBy };
 }
 
 export function carriedQty(dept: DeptId): number {
@@ -52,11 +92,11 @@ export function carriedQty(dept: DeptId): number {
 export interface SetupCheck {
   cost: number;
   cashAfter: number;
-  perDept: Record<DeptId, { cost: number; morningFits: boolean; space: number; middayOverflow: number }>;
+  perDept: Record<DeptId, { cost: number; morningFits: boolean; space: number; midday: MiddayRoom }>;
   errors: string[];
 }
 
-export function checkSetup(setup: SetupPlan): SetupCheck {
+export function checkSetup(setup: SetupPlan, forecast: readonly number[] = C.demand.forecast): SetupCheck {
   const errors: string[] = [];
   let cost = 0;
   const perDept = {} as SetupCheck['perDept'];
@@ -65,21 +105,28 @@ export function checkSetup(setup: SetupPlan): SetupCheck {
     const o = setup.orders[d];
     const m = Math.max(0, Math.round(o.morning));
     const md = Math.max(0, Math.round(o.midday));
-    const c = (m + md) * cfg.unitCost;
+    const c =
+      d === 'chilled'
+        ? m * deliveryUnitCost(d, setup.chilledLife.morning) + md * deliveryUnitCost(d, setup.chilledLife.midday)
+        : (m + md) * cfg.unitCost;
     cost += c;
     const space = cfg.shelfCapacity + cfg.backroomCapacity - carriedQty(d);
     const morningFits = m <= space;
     if (!morningFits) errors.push(`${cfg.name}: the morning delivery doesn't fit (room for ${space}).`);
     if (md > C.openingOrder.maxMidday) errors.push(`${cfg.name}: the midday lorry takes at most ${C.openingOrder.maxMidday}.`);
     if (!Number.isFinite(o.morning) || !Number.isFinite(o.midday)) errors.push(`${cfg.name}: enter a number.`);
-    perDept[d] = { cost: c, morningFits, space, middayOverflow: Math.max(0, md - cfg.backroomCapacity) };
+    perDept[d] = { cost: c, morningFits, space, midday: middayRoomEstimate(setup, forecast, d) };
   }
   const cashAfter = C.startingCash - cost;
   if (cashAfter < 0) errors.push(`That costs ${money(cost)}, but you only have ${money(C.startingCash)}.`);
   return { cost, cashAfter, perDept, errors };
 }
 
-function datedBatches(dept: DeptId, qty: number, unitCost: number): Batch[] {
+function datedBatches(dept: DeptId, qty: number, unitCost: number, life?: ChilledLife): Batch[] {
+  if (dept === 'chilled') {
+    const l = C.chilledLife[life ?? 'long'];
+    return [{ qty, unitCost, expiresAt: l.expiresAt, label: l.label }];
+  }
   return C.deliveryDating[dept].map((s) => ({ qty: qty * s.share, unitCost, expiresAt: s.expiresAt, label: s.label }));
 }
 
@@ -100,7 +147,8 @@ export function startDay(seed: number, setup: SetupPlan): SimState {
     }
     // Night crew puts the morning delivery away: shelves first, then stockroom.
     const morning = Math.round(setup.orders[d].morning);
-    S.add(backroom, datedBatches(d, morning, cfg.unitCost));
+    const life = d === 'chilled' ? setup.chilledLife.morning : undefined;
+    S.add(backroom, datedBatches(d, morning, deliveryUnitCost(d, life), life));
     const space = Math.max(0, cfg.shelfCapacity - S.total(shelf));
     S.add(shelf, S.take(backroom, space));
     stock[d] = { shelf, backroom, dock: [] };
@@ -134,7 +182,8 @@ export function startDay(seed: number, setup: SetupPlan): SimState {
         id: `midday-${d}`,
         dept: d,
         qty,
-        unitCost: C.departments[d].unitCost,
+        unitCost: deliveryUnitCost(d, setup.chilledLife.midday),
+        life: d === 'chilled' ? setup.chilledLife.midday : undefined,
         arrivesAt: C.openingOrder.middayHour,
         kind: 'midday',
         originalHour: C.openingOrder.middayHour,
@@ -181,7 +230,7 @@ function prepareHour(state: SimState, waste: WasteLine[]): void {
   for (const d of DEPTS) expire(state, d, h, waste, notes);
   // Deliveries reaching the dock.
   for (const del of state.deliveries.filter((x) => x.arrivesAt === h)) {
-    S.add(state.stock[del.dept].dock, datedBatches(del.dept, del.qty, del.unitCost));
+    S.add(state.stock[del.dept].dock, datedBatches(del.dept, del.qty, del.unitCost, del.life));
     notes.push(
       `${del.kind === 'emergency' ? 'Emergency' : 'Midday'} delivery: ${Math.round(del.qty)} ${deptName(del.dept).toLowerCase()} items are on the dock waiting to be received.`,
     );
@@ -397,7 +446,7 @@ export function describeAction(state: SimState, a: ActionRequest, alreadyPlanned
       const cfg = C.departments[a.dept];
       title = `Emergency order: ${deptName(a.dept).toLowerCase()}`;
       timing = `Arrives on the dock at ${hourLabel(h + A.emergency.delayHours)}. Someone must receive it.`;
-      effect = `${A.emergency.qty} items at ${money(cfg.unitCost * A.emergency.costMult)} each (normally ${money(cfg.unitCost)}) plus a ${money(A.emergency.deliveryFee)} delivery fee.`;
+      effect = `${A.emergency.qty} items at ${money(cfg.unitCost * A.emergency.costMult)} each (normally ${money(cfg.unitCost)}) plus a ${money(A.emergency.deliveryFee)} delivery fee.${a.dept === 'chilled' ? ' Longer-life dates.' : ''}`;
       if (state.used.emergency >= A.emergency.maxPerDay) reason = `The cash-and-carry van only does ${A.emergency.maxPerDay} runs a day.`;
       else if (state.deliveries.some((x) => x.kind === 'emergency' && x.dept === a.dept)) reason = 'An emergency order for this department is already on its way.';
       else if (h + A.emergency.delayHours >= C.hours) reason = 'It would arrive after closing.';
@@ -509,6 +558,7 @@ function applyActions(state: SimState, actions: ActionRequest[]): void {
           unitCost: unit,
           arrivesAt: h + A.emergency.delayHours,
           kind: 'emergency',
+          life: a.dept === 'chilled' ? 'long' : undefined,
           originalHour: h + A.emergency.delayHours,
         });
         break;
@@ -632,6 +682,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
   const steps: StepSnapshot[] = [];
 
   for (let k = 0; k < STEPS; k++) {
+    const stepWork = { received: 0, moved: { produce: 0, chilled: 0, ambient: 0 } as Record<DeptId, number> };
     const abs = h * STEPS + k;
     if (state.fridge.status === 'fault' && state.fridge.repairAtStep !== null && abs >= state.fridge.repairAtStep) {
       state.fridge.status = 'fixed';
@@ -648,6 +699,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
         S.add(st.backroom, S.take(st.dock, n));
         rcap -= n;
         used.receive += n;
+        stepWork.received += n;
         dept[d].received += n;
       }
     }
@@ -674,6 +726,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
           S.add(st.backroom, S.takeNewest(st.shelf, rescue));
           cap -= rescue;
           used.repl[d] += rescue;
+          stepWork.moved[d] += rescue;
         }
         const stranded = S.total(st.shelf) - shelfCap;
         if (stranded > 1e-9 && d === 'chilled') {
@@ -689,6 +742,7 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
         S.add(st.shelf, S.take(st.backroom, n * C.demand.rotation));
         S.add(st.shelf, S.takeNewest(st.backroom, n * (1 - C.demand.rotation)));
         used.repl[d] += n;
+        stepWork.moved[d] += n;
         dept[d].replenished += n;
       }
     }
@@ -780,6 +834,9 @@ export function runHour(input: SimState, plan: HourPlan, opts: RunOptions = {}):
       abandoned: left,
       emptyDepts: empty,
       fridgeFault: state.fridge.status === 'fault',
+      moved: stepWork.moved,
+      received: stepWork.received,
+      tillCapacity: tillCap / STEPS,
     });
   }
 

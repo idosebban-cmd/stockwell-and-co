@@ -15,7 +15,7 @@ import {
 } from '../sim/save';
 import type { HourPlan, HourReport, SetupPlan } from '../sim/types';
 
-export type Phase = 'intro' | 'setup' | 'plan' | 'replay' | 'results' | 'closed';
+export type Phase = 'setup' | 'plan' | 'replay' | 'results' | 'closed';
 
 export function useGame() {
   const storage = useMemo(() => getStorage(), []);
@@ -31,7 +31,7 @@ export function useGame() {
   );
   const [draft, setDraft] = useState<HourPlan | null>(() => initial?.draft ?? null);
   const [phase, setPhase] = useState<Phase>(() => {
-    if (!initial) return settings.seenIntro ? 'setup' : 'intro';
+    if (!initial) return 'setup';
     if (!initial.record.setup) return 'setup';
     if (initial.record.plans.length >= CONFIG.hours) return 'closed';
     return 'plan';
@@ -61,11 +61,6 @@ export function useGame() {
     },
     [storage],
   );
-
-  const startSetup = useCallback(() => {
-    setSettings({ seenIntro: true });
-    setPhase('setup');
-  }, [setSettings]);
 
   const confirmSetup = useCallback((setup: SetupPlan) => {
     setRecord((r) => ({ ...r, setup, plans: [] }));
@@ -132,7 +127,6 @@ export function useGame() {
     lastReport,
     saveOk,
     resumed: resumed.current,
-    startSetup,
     confirmSetup,
     runNextHour,
     finishReplay,

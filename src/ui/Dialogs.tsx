@@ -46,7 +46,7 @@ export function Help({ onClose }: { onClose: () => void }) {
         <ol>
           <li>Read the Tannoy and the shift manager’s notes.</li>
           <li>Give everyone a job: pick from their list, or select a person and click a zone in the shop.</li>
-          <li>Set prices and add any actions (they show the cost and timing first).</li>
+          <li>Click a department, the tills, the dock or the break room to see its details, prices and actions (each shows cost and timing first).</li>
           <li>Press “Run” (or R). Watch the replay, or skip it. Read why things happened.</li>
         </ol>
         <h3>How the shop works</h3>
@@ -67,7 +67,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <strong>Money:</strong> stock costs cash when bought but only becomes a cost when sold (or wasted). Unsold stock keeps its value.
           </li>
           <li>
-            <strong>Dates:</strong> Friday’s produce goes past its best at 13:00. “Use by Sunday” chilled is binned at close (we are closed Sundays). Cupboard stock keeps.
+            <strong>Dates:</strong> Friday’s produce goes past its best at 13:00. Chilled comes short-dated (“use by Sunday”, cheaper; binned at close if unsold, as we are closed Sundays) or longer-life (dearer, keeps). You choose per delivery when you customise the opening order. Cupboard stock keeps.
           </li>
         </ul>
         <h3>Keyboard</h3>

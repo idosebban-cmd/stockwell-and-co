@@ -16,6 +16,7 @@ export type DeptId = 'produce' | 'chilled' | 'ambient';
 export const DEPTS: readonly DeptId[] = ['produce', 'chilled', 'ambient'] as const;
 
 export type PriceTier = 'value' | 'standard' | 'premium';
+export type ChilledLife = 'short' | 'long';
 export const PRICE_TIERS: readonly PriceTier[] = ['value', 'standard', 'premium'] as const;
 
 export const CONFIG = {
@@ -98,18 +99,23 @@ export const CONFIG = {
     ],
   } satisfies Record<DeptId, CarriedBatch[]>,
 
-  /**
-   * What a delivery looks like. Chilled arrives with mixed dates: the store is
-   * closed on Sunday, so "use by Sunday" stock is binned at close.
-   */
+  /** What a produce or cupboard delivery looks like. Chilled dates are the player's choice (below). */
   deliveryDating: {
     produce: [{ share: 1, label: 'Fresh produce', expiresAt: null }],
-    chilled: [
-      { share: 0.6, label: 'Use by Sunday', expiresAt: 8 },
-      { share: 0.4, label: 'Use by Wednesday', expiresAt: null },
-    ],
     ambient: [{ share: 1, label: 'Tins & packets', expiresAt: null }],
-  } satisfies Record<DeptId, DatingShare[]>,
+  } satisfies Record<'produce' | 'ambient', DatingShare[]>,
+
+  /**
+   * Chilled deliveries come in two shelf lives, chosen per delivery. The shop is
+   * closed on Sunday, so "use by Sunday" stock that hasn't sold is binned at
+   * close. Longer-life stock costs more but keeps its value if it doesn't sell.
+   * `departments.chilled.unitCost` is the reference cost used for margin estimates
+   * and emergency orders.
+   */
+  chilledLife: {
+    short: { name: 'Short-dated', label: 'Use by Sunday', expiresAt: 8, unitCost: 1.35 },
+    long: { name: 'Longer-life', label: 'Use by Wednesday', expiresAt: null, unitCost: 1.55 },
+  } satisfies Record<ChilledLife, { name: string; label: string; expiresAt: number | null; unitCost: number }>,
 
   /** Opening order. Morning stock is put away by the night crew. */
   openingOrder: {
@@ -120,6 +126,8 @@ export const CONFIG = {
       chilled: { morning: 580, midday: 480 },
       ambient: { morning: 1000, midday: 200 },
     } satisfies Record<DeptId, { morning: number; midday: number }>,
+    /** Morning chilled sells today; afternoon chilled may be left over, so it keeps. */
+    recommendedChilledLife: { morning: 'short', midday: 'long' } satisfies Record<'morning' | 'midday', ChilledLife>,
     maxMidday: 1500,
   },
 

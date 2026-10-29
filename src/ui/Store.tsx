@@ -1,8 +1,29 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { CONFIG, DEPTS, type DeptId } from '../sim/config';
 import { assignmentLimit, productivity } from '../sim/engine';
 import { ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, StaffMember } from '../sim/types';
+import { DroppedBasket, poseFor, Shopper, StaffFigure } from './art/Characters';
+
+export type ZoneId = 'produce' | 'chilled' | 'ambient' | 'tills' | 'dock' | 'break';
+
+export const ZONE_JOB: Record<ZoneId, AssignmentId> = {
+  produce: 'replenish:produce',
+  chilled: 'replenish:chilled',
+  ambient: 'replenish:ambient',
+  tills: 'tills',
+  dock: 'receive',
+  break: 'break',
+};
+
+export const ZONE_NAME: Record<ZoneId, string> = {
+  produce: 'Fruit & veg',
+  chilled: 'Chilled food',
+  ambient: 'Cupboard essentials',
+  tills: 'Tills',
+  dock: 'Delivery dock',
+  break: 'Break room',
+};
 
 export interface StoreView {
   shelf: Record<DeptId, number>;
@@ -12,65 +33,75 @@ export interface StoreView {
   queue: number;
   arrivals: number;
   abandoned: number;
+  /** Baskets left behind so far this hour. */
+  dropped: number;
   emptyDepts: DeptId[];
   fridgeFault: boolean;
   lorry: boolean;
+  promo: DeptId[];
+  markdown: DeptId[];
   /** Changes every replay step so walk-in animations restart. */
   tick: string;
   clock: string;
 }
 
+/** What each staff member is doing: working, standing idle (nothing to do), or just planned. */
+export type Activity = 'work' | 'idle' | 'plan';
+
 interface Props {
   view: StoreView;
   staff: StaffMember[];
   assignments: Record<string, AssignmentId>;
+  activity: Record<string, Activity>;
   selected: string | null;
   onSelectStaff: (id: string) => void;
   onZone: (a: AssignmentId) => void;
+  context: ZoneId | null;
+  onContext: (z: ZoneId | null) => void;
   interactive: boolean;
   animating: boolean;
   reducedMotion: boolean;
 }
 
-const W = 960;
-const H = 600;
+const W = 1000;
+const H = 680;
+const LANE_Y = [468, 530, 592];
+const QUEUE_FRONT_X = 780;
+const QUEUE_GAP = 22;
+const ENTRANCE: [number, number] = [130, 664];
 
-/** Where each job's staff stand. */
+/** Feet positions for each job. */
 const SLOTS: Record<AssignmentId, [number, number][]> = {
-  tills: [
-    [445, 548],
-    [585, 548],
-    [725, 548],
-  ],
+  tills: LANE_Y.map((y) => [958, y + 46] as [number, number]),
   'replenish:produce': [
-    [80, 400],
-    [180, 400],
+    [84, 426],
+    [210, 426],
   ],
   'replenish:chilled': [
-    [880, 232],
-    [700, 232],
+    [726, 266],
+    [884, 266],
   ],
   'replenish:ambient': [
-    [500, 380],
-    [760, 380],
+    [566, 336],
+    [806, 390],
   ],
   receive: [
-    [420, 66],
-    [530, 66],
+    [432, 116],
+    [520, 116],
   ],
   break: [
-    [800, 100],
-    [880, 100],
+    [772, 128],
+    [846, 128],
   ],
 };
 
-const ZONES: { a: AssignmentId; x: number; y: number; w: number; h: number; label: string; badge: [number, number] }[] = [
-  { a: 'replenish:produce', x: 16, y: 170, w: 262, h: 262, label: 'Fruit & veg', badge: [226, 408] },
-  { a: 'replenish:chilled', x: 300, y: 166, w: 644, h: 92, label: 'Chilled food', badge: [890, 172] },
-  { a: 'replenish:ambient', x: 300, y: 266, w: 644, h: 140, label: 'Cupboard essentials', badge: [890, 410] },
-  { a: 'tills', x: 380, y: 470, w: 420, h: 112, label: 'Tills', badge: [384, 474] },
-  { a: 'receive', x: 384, y: 16, w: 180, h: 128, label: 'Delivery dock', badge: [512, 34] },
-  { a: 'break', x: 744, y: 16, w: 200, h: 128, label: 'Break room', badge: [890, 34] },
+const ZONES: { z: ZoneId; x: number; y: number; w: number; h: number; badge: [number, number] }[] = [
+  { z: 'produce', x: 12, y: 156, w: 268, h: 278, badge: [226, 384] },
+  { z: 'chilled', x: 300, y: 156, w: 688, h: 114, badge: [936, 158] },
+  { z: 'ambient', x: 316, y: 272, w: 672, h: 160, badge: [936, 414] },
+  { z: 'tills', x: 316, y: 466, w: 672, h: 204, badge: [806, 440] },
+  { z: 'dock', x: 396, y: 12, w: 180, h: 134, badge: [524, 16] },
+  { z: 'break', x: 704, y: 12, w: 284, h: 134, badge: [936, 16] },
 ];
 
 function fillWord(f: number): string {
@@ -80,23 +111,13 @@ function fillWord(f: number): string {
   return 'OK';
 }
 
-function initials(name: string): string {
-  return name === 'Agency temp' ? 'T' : name.slice(0, 2);
-}
-
-function energyColour(e: number): string {
-  if (e < CONFIG.staff.exhaustedBelow) return 'var(--bad)';
-  if (e < CONFIG.staff.tiredBelow) return 'var(--mustard)';
-  return 'var(--good)';
-}
-
-/** Deterministic pseudo-random in [0,1) from integers (for scatter positions). */
 function hash(a: number, b: number): number {
   const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
-function StoreImpl({ view, staff, assignments, selected, onSelectStaff, onZone, interactive, animating, reducedMotion }: Props) {
+function StoreImpl(props: Props) {
+  const { view, staff, assignments, activity, selected, onSelectStaff, onZone, context, onContext, interactive, animating, reducedMotion } = props;
   const counts = new Map<AssignmentId, number>();
   const placed: { s: StaffMember; a: AssignmentId; x: number; y: number }[] = [];
   for (const s of staff) {
@@ -104,103 +125,100 @@ function StoreImpl({ view, staff, assignments, selected, onSelectStaff, onZone, 
     if (!a) continue;
     const i = counts.get(a) ?? 0;
     counts.set(a, i + 1);
-    const slot = SLOTS[a][i] ?? SLOTS[a][SLOTS[a].length - 1];
-    placed.push({ s, a, x: slot[0] + (i >= SLOTS[a].length ? 18 : 0), y: slot[1] });
+    const slot = SLOTS[a][Math.min(i, SLOTS[a].length - 1)];
+    placed.push({ s, a, x: slot[0] + (i >= SLOTS[a].length ? 20 : 0), y: slot[1] });
   }
   const openTills = counts.get('tills') ?? 0;
   const motion = !reducedMotion && animating;
+  const selectedName = staff.find((s) => s.id === selected)?.name;
 
   return (
     <svg
       className={`store ${motion ? 'is-animating' : ''}`}
       viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="Top-down plan of the shop. Use the staff list or the zone buttons to assign people."
+      role="group"
+      aria-label="Plan of the shop. Select a department to see its controls, or select a staff member and then a zone to move them."
     >
       <defs>
-        <pattern id="tiles" width="24" height="24" patternUnits="userSpaceOnUse">
-          <rect width="24" height="24" fill="var(--floor)" />
-          <path d="M24 0H0V24" fill="none" stroke="var(--floor-line)" strokeWidth="1" />
+        <pattern id="tiles" width="26" height="26" patternUnits="userSpaceOnUse">
+          <rect width="26" height="26" fill="var(--floor)" />
+          <path d="M26 0H0V26" fill="none" stroke="var(--floor-line)" strokeWidth="1" />
         </pattern>
-        <pattern id="boards" width="40" height="12" patternUnits="userSpaceOnUse">
-          <rect width="40" height="12" fill="var(--back-floor)" />
-          <path d="M0 12H40M20 0V12" stroke="var(--back-line)" strokeWidth="1" />
+        <pattern id="boards" width="44" height="12" patternUnits="userSpaceOnUse">
+          <rect width="44" height="12" fill="var(--back-floor)" />
+          <path d="M0 12H44M22 0V12" stroke="var(--back-line)" strokeWidth="1" />
         </pattern>
         <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect width="8" height="8" fill="rgba(179,54,44,0.12)" />
           <line x1="0" y1="0" x2="0" y2="8" stroke="var(--bad)" strokeWidth="2" />
         </pattern>
+        <pattern id="belt" width="8" height="16" patternUnits="userSpaceOnUse">
+          <rect width="8" height="16" fill="#4a4442" />
+          <rect width="2" height="16" fill="#5d5754" />
+        </pattern>
       </defs>
 
-      {/* Building */}
+      {/* Building shell */}
       <rect x="4" y="4" width={W - 8} height={H - 8} rx="14" fill="url(#tiles)" stroke="var(--wall)" strokeWidth="8" />
-      {/* Back of house */}
-      <rect x="8" y="8" width={W - 16} height="144" fill="url(#boards)" />
-      <line x1="8" y1="152" x2={W - 8} y2="152" stroke="var(--wall)" strokeWidth="6" />
-      <line x1="376" y1="8" x2="376" y2="152" stroke="var(--wall)" strokeWidth="5" />
-      <line x1="572" y1="8" x2="572" y2="152" stroke="var(--wall)" strokeWidth="5" />
-      <line x1="736" y1="8" x2="736" y2="152" stroke="var(--wall)" strokeWidth="5" />
-      {/* doorways */}
-      <rect x="300" y="146" width="46" height="12" fill="var(--floor)" />
-      <rect x="470" y="146" width="46" height="12" fill="var(--floor)" />
-      <rect x="760" y="146" width="40" height="12" fill="var(--floor)" />
+      <rect x="8" y="8" width={W - 16} height="142" fill="url(#boards)" />
+      <Walkways />
+      <BackWalls />
 
       <Stockroom backroom={view.backroom} />
       <Dock dock={view.dock} lorry={view.lorry} />
       <Office clock={view.clock} />
       <BreakRoom />
 
-      <Produce fill={view.shelf.produce / view.shelfCap.produce} units={view.shelf.produce} cap={view.shelfCap.produce} empty={view.emptyDepts.includes('produce')} />
-      <Chilled
-        fill={view.shelf.chilled / CONFIG.departments.chilled.shelfCapacity}
-        units={view.shelf.chilled}
-        cap={view.shelfCap.chilled}
-        fault={view.fridgeFault}
-        empty={view.emptyDepts.includes('chilled')}
-      />
-      <Ambient fill={view.shelf.ambient / view.shelfCap.ambient} units={view.shelf.ambient} cap={view.shelfCap.ambient} empty={view.emptyDepts.includes('ambient')} />
+      <Produce view={view} />
+      <Chilled view={view} />
+      <Groceries view={view} />
+      <Checkouts open={openTills} queue={view.queue} />
+      <Entrance dropped={view.dropped} />
 
-      <Tills open={openTills} queue={view.queue} />
-      <Entrance />
-
-      {/* Zones (click to assign the selected employee) */}
-      {ZONES.map((z) => {
-        const n = counts.get(z.a) ?? 0;
-        const lim = assignmentLimit(z.a);
+      {/* Zones: select a department, or place the selected employee */}
+      {ZONES.map((zone) => {
+        const a = ZONE_JOB[zone.z];
+        const n = counts.get(a) ?? 0;
+        const lim = assignmentLimit(a);
         const full = n >= lim;
         const label = selected
-          ? `Assign ${staff.find((s) => s.id === selected)?.name ?? ''} to ${ASSIGNMENT_LABEL[z.a]} (${n} of ${lim})`
-          : `${z.label}: ${n} of ${lim} staff`;
+          ? `Assign ${selectedName} to ${ASSIGNMENT_LABEL[a]} (${n} of ${lim})${full ? ', full' : ''}`
+          : `${ZONE_NAME[zone.z]}: ${n} of ${lim} staff. Show controls.`;
+        const activate = () => {
+          if (!interactive) return;
+          if (selected) onZone(a);
+          else onContext(context === zone.z ? null : zone.z);
+        };
         return (
-          <g key={z.a}>
+          <g key={zone.z}>
             <rect
-              className={`zone ${selected && interactive ? 'zone-armed' : ''} ${full ? 'zone-full' : ''}`}
-              x={z.x}
-              y={z.y}
-              width={z.w}
-              height={z.h}
+              className={`zone ${selected && interactive ? 'zone-armed' : interactive ? 'zone-browse' : ''} ${full ? 'zone-full' : ''} ${context === zone.z ? 'zone-context' : ''}`}
+              x={zone.x}
+              y={zone.y}
+              width={zone.w}
+              height={zone.h}
               rx="10"
-              tabIndex={interactive && selected ? 0 : -1}
+              tabIndex={interactive ? 0 : -1}
               role="button"
               aria-label={label}
-              aria-disabled={!interactive || !selected}
-              onClick={() => interactive && selected && onZone(z.a)}
+              aria-pressed={!selected ? context === zone.z : undefined}
+              onClick={activate}
               onKeyDown={(e) => {
-                if ((e.key === 'Enter' || e.key === ' ') && interactive && selected) {
+                if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  onZone(z.a);
+                  activate();
                 }
               }}
             />
-            <ZoneBadge z={z} n={n} lim={lim} />
+            <ZoneBadge x={zone.badge[0]} y={zone.badge[1]} n={n} lim={lim} />
           </g>
         );
       })}
 
-      {/* Shoppers during the replay */}
-      {motion || view.arrivals > 0 ? <Shoppers view={view} motion={motion} /> : null}
+      <QueueFigures open={openTills} queue={view.queue} />
+      <AisleShoppers view={view} motion={motion} />
+      <WalkOuts view={view} motion={motion} />
 
-      {/* Staff tokens */}
       {placed.map(({ s, a, x, y }) => (
         <StaffToken
           key={s.id}
@@ -208,6 +226,7 @@ function StoreImpl({ view, staff, assignments, selected, onSelectStaff, onZone, 
           a={a}
           x={x}
           y={y}
+          act={activity[s.id] ?? 'plan'}
           selected={selected === s.id}
           interactive={interactive}
           onClick={() => onSelectStaff(s.id)}
@@ -219,66 +238,97 @@ function StoreImpl({ view, staff, assignments, selected, onSelectStaff, onZone, 
 
 export const Store = memo(StoreImpl);
 
-function ZoneBadge({ z, n, lim }: { z: (typeof ZONES)[number]; n: number; lim: number }) {
-  const [bx, y] = z.badge;
-  const x = bx + 46;
+// ---------------------------------------------------------------------------
+// Structure
+// ---------------------------------------------------------------------------
+
+function Walkways() {
+  const strips: [number, number, number, number][] = [
+    [290, 236, 698, 34], // main aisle in front of chilled
+    [282, 156, 32, 312], // cross aisle by fruit & veg, up to the stockroom door
+    [12, 434, 976, 32], // front aisle
+    [316, 310, 672, 30], // grocery aisle 2
+    [316, 364, 672, 30], // grocery aisle 3
+  ];
   return (
-    <g className="zone-badge" aria-hidden="true">
-      <rect x={x - 46} y={y} width="46" height="18" rx="9" fill={n === 0 ? 'var(--paper)' : 'var(--burgundy)'} stroke="var(--burgundy)" />
-      <text x={x - 23} y={y + 13} textAnchor="middle" fontSize="11" fill={n === 0 ? 'var(--burgundy)' : 'var(--paper)'} fontWeight="700">
-        {n}/{lim} staff
+    <g aria-hidden="true">
+      {strips.map(([x, y, w, h], i) => (
+        <rect key={i} x={x} y={y} width={w} height={h} fill="var(--aisle)" />
+      ))}
+      <AisleSign x={300} y={252} text="1" />
+      <AisleSign x={330} y={325} text="2" />
+      <AisleSign x={330} y={379} text="3" />
+    </g>
+  );
+}
+
+function AisleSign({ x, y, text }: { x: number; y: number; text: string }) {
+  return (
+    <g>
+      <circle cx={x} cy={y} r="8" fill="var(--burgundy)" />
+      <text x={x} y={y + 3.5} textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--paper)">
+        {text}
       </text>
     </g>
   );
 }
 
-function Level({ x, y, w, fill, units, cap, label }: { x: number; y: number; w: number; fill: number; units: number; cap: number; label: string }) {
-  const f = Math.max(0, Math.min(1, fill));
-  const word = fillWord(units / Math.max(1, cap));
+function BackWalls() {
+  const doors: [number, string][] = [
+    [296, 'STAFF'],
+    [470, 'DOCK'],
+    [740, 'STAFF'],
+  ];
   return (
     <g aria-hidden="true">
-      <rect x={x} y={y} width={w} height="22" rx="6" fill="var(--paper)" stroke="var(--line-strong)" />
-      <rect x={x + 3} y={y + 15} width={(w - 6) * f} height="4" rx="2" fill={word === 'Empty' || word === 'Low' ? 'var(--bad)' : 'var(--good)'} />
-      <text x={x + 6} y={y + 12} fontSize="11" fill="var(--ink)" fontWeight="700">
-        {label}
-      </text>
-      <text x={x + w - 6} y={y + 12} fontSize="11" textAnchor="end" fill={word === 'Empty' || word === 'Low' ? 'var(--bad)' : 'var(--muted)'} fontWeight="700">
-        {word === 'Empty' ? '⚠ EMPTY' : `${word} · ${Math.round(units)}`}
-      </text>
+      <path d="M8 150 H296 M346 150 H470 M520 150 H740 M790 150 H992" stroke="var(--wall)" strokeWidth="6" />
+      <path d="M392 8 V150 M580 8 V150 M700 8 V150" stroke="var(--wall)" strokeWidth="5" />
+      {doors.map(([x, t]) => (
+        <g key={x}>
+          <rect x={x + 2} y="147" width="21" height="6" fill="#c8b593" />
+          <rect x={x + 27} y="147" width="21" height="6" fill="#c8b593" />
+          <text x={x + 25} y="166" textAnchor="middle" fontSize="7" fill="var(--muted)" letterSpacing="1">
+            {t}
+          </text>
+        </g>
+      ))}
     </g>
+  );
+}
+
+function RoomLabel({ x, y, children }: { x: number; y: number; children: ReactNode }) {
+  return (
+    <text x={x} y={y} className="room-label">
+      {children}
+    </text>
   );
 }
 
 function Stockroom({ backroom }: { backroom: Record<DeptId, number> }) {
   const bays: [DeptId, number, string][] = [
-    ['produce', 28, 'Fruit & veg'],
+    ['produce', 22, 'Fruit & veg'],
     ['chilled', 144, 'Cold room'],
-    ['ambient', 260, 'Cupboard'],
+    ['ambient', 266, 'Cupboard'],
   ];
   return (
     <g aria-hidden="true">
-      <text x="20" y="28" className="room-label">
+      <RoomLabel x={20} y={26}>
         STOCKROOM
-      </text>
+      </RoomLabel>
       {bays.map(([d, x, label]) => {
         const cap = CONFIG.departments[d].backroomCapacity;
         const n = Math.round(Math.min(1, backroom[d] / cap) * 12);
         return (
           <g key={d}>
-            <rect x={x} y="38" width="100" height="78" rx="4" fill={d === 'chilled' ? 'var(--cold)' : 'rgba(255,255,255,0.35)'} stroke="var(--line-strong)" />
-            {Array.from({ length: n }, (_, i) => (
-              <rect
-                key={i}
-                x={x + 6 + (i % 4) * 23}
-                y={92 - Math.floor(i / 4) * 22}
-                width="20"
-                height="18"
-                rx="2"
-                className={`crate crate-${d}`}
-              />
-            ))}
-            <text x={x + 50} y="132" textAnchor="middle" fontSize="11" fill="var(--ink)">
-              {label}: {Math.round(backroom[d])}
+            {d === 'chilled' && <rect x={x - 4} y="32" width="114" height="92" rx="4" fill="var(--cold)" stroke="#8fb3c2" strokeDasharray="4 3" />}
+            <rect x={x} y="36" width="106" height="84" fill="none" stroke="#6f6a66" strokeWidth="2" />
+            <path d={`M${x} 64 h106 M${x} 92 h106`} stroke="#6f6a66" strokeWidth="2" />
+            {Array.from({ length: n }, (_, i) => {
+              const shelf = Math.floor(i / 4);
+              return <rect key={i} x={x + 4 + (i % 4) * 25} y={98 - shelf * 28} width="22" height="20" rx="2" className={`crate crate-${d}`} />;
+            })}
+            <text x={x + 53} y="138" textAnchor="middle" fontSize="11" fill={backroom[d] < 1 ? 'var(--bad)' : 'var(--ink)'} fontWeight={backroom[d] < 1 ? 700 : 400}>
+              {label}: {backroom[d] < 1 ? 'none' : Math.round(backroom[d])}
             </text>
           </g>
         );
@@ -291,23 +341,27 @@ function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
   const n = Math.min(10, Math.ceil(dock / 120));
   return (
     <g aria-hidden="true">
-      <text x="390" y="28" className="room-label">
+      <RoomLabel x={404} y={26}>
         DOCK
-      </text>
-      <rect x="470" y="8" width="90" height="10" fill="var(--mustard)" />
+      </RoomLabel>
+      <rect x="434" y="8" width="112" height="9" fill="var(--mustard)" />
+      <path d="M440 8 l6 9 M456 8 l6 9 M472 8 l6 9 M488 8 l6 9 M504 8 l6 9 M520 8 l6 9 M536 8 l6 9" stroke="var(--ink)" strokeWidth="2" opacity="0.4" />
       {lorry && (
         <g className="lorry">
-          <rect x="474" y="-30" width="82" height="36" rx="4" fill="var(--burgundy)" />
-          <text x="515" y="-8" textAnchor="middle" fontSize="10" fill="var(--paper)">
+          <rect x="440" y="18" width="100" height="30" rx="3" fill="var(--burgundy)" />
+          <text x="490" y="37" textAnchor="middle" fontSize="9" fill="var(--paper)" letterSpacing="1">
             WHOLESALE
           </text>
         </g>
       )}
       {Array.from({ length: n }, (_, i) => (
-        <rect key={i} x={392 + (i % 5) * 34} y={i < 5 ? 108 : 86} width="28" height="20" rx="3" className="crate crate-dock" />
+        <g key={i}>
+          <rect x={404 + (i % 5) * 34} y={i < 5 ? 100 : 76} width="30" height="22" rx="2" className="crate crate-dock" />
+          <path d={`M${404 + (i % 5) * 34} ${(i < 5 ? 100 : 76) + 11} h30`} stroke="rgba(0,0,0,0.2)" />
+        </g>
       ))}
-      <text x="474" y="140" textAnchor="middle" fontSize="11" fill={dock > 0 ? 'var(--bad)' : 'var(--muted)'} fontWeight={dock > 0 ? 700 : 400}>
-        {dock > 0 ? `Waiting: ${Math.round(dock)} items` : 'Empty'}
+      <text x="486" y="140" textAnchor="middle" fontSize="11" fill={dock > 0 ? 'var(--bad)' : 'var(--muted)'} fontWeight={dock > 0 ? 700 : 400}>
+        {dock > 0 ? `Waiting: ${Math.round(dock)} items` : 'Nothing waiting'}
       </text>
     </g>
   );
@@ -316,14 +370,15 @@ function Dock({ dock, lorry }: { dock: number; lorry: boolean }) {
 function Office({ clock }: { clock: string }) {
   return (
     <g aria-hidden="true">
-      <text x="586" y="28" className="room-label">
+      <RoomLabel x={590} y={26}>
         OFFICE
-      </text>
-      <circle cx="654" cy="78" r="30" fill="var(--paper)" stroke="var(--burgundy)" strokeWidth="4" />
-      <text x="654" y="84" textAnchor="middle" fontSize="16" fontWeight="700" fill="var(--burgundy)" className="clock-text">
+      </RoomLabel>
+      <circle cx="640" cy="72" r="28" fill="var(--paper)" stroke="var(--burgundy)" strokeWidth="4" />
+      <text x="640" y="78" textAnchor="middle" fontSize="15" fontWeight="700" fill="var(--burgundy)">
         {clock}
       </text>
-      <text x="654" y="132" textAnchor="middle" fontSize="10" fill="var(--muted)">
+      <rect x="600" y="112" width="80" height="16" rx="2" fill="var(--wood)" />
+      <text x="640" y="140" textAnchor="middle" fontSize="9" fill="var(--muted)">
         (mostly biscuits)
       </text>
     </g>
@@ -333,89 +388,175 @@ function Office({ clock }: { clock: string }) {
 function BreakRoom() {
   return (
     <g aria-hidden="true">
-      <text x="752" y="28" className="room-label">
+      <RoomLabel x={714} y={26}>
         BREAK ROOM
+      </RoomLabel>
+      <rect x="738" y="88" width="148" height="18" rx="6" fill="var(--burgundy-dark)" />
+      <rect x="742" y="104" width="140" height="22" rx="5" fill="var(--burgundy)" />
+      <rect x="732" y="96" width="12" height="32" rx="4" fill="var(--burgundy-dark)" />
+      <rect x="880" y="96" width="12" height="32" rx="4" fill="var(--burgundy-dark)" />
+      <rect x="906" y="40" width="76" height="16" rx="2" fill="var(--wood)" />
+      <rect x="918" y="28" width="14" height="14" rx="3" fill="#7d7d7d" />
+      <rect x="944" y="32" width="7" height="9" rx="1" fill="var(--paper)" stroke="var(--burgundy)" />
+      <rect x="956" y="32" width="7" height="9" rx="1" fill="var(--mustard-soft)" stroke="var(--burgundy)" />
+      <rect x="912" y="68" width="62" height="52" rx="2" fill="#fff" stroke="var(--line-strong)" />
+      <text x="943" y="81" textAnchor="middle" fontSize="8" fontWeight="700" fill="var(--burgundy)">
+        ROTA
       </text>
-      <rect x="808" y="40" width="64" height="34" rx="6" fill="var(--wood)" />
-      <rect x="900" y="40" width="26" height="22" rx="3" fill="var(--muted)" />
-      <text x="913" y="76" textAnchor="middle" fontSize="9" fill="var(--muted)">
-        kettle
+      <path d="M918 88 h50 M918 96 h50 M918 104 h40 M918 112 h46" stroke="var(--line-strong)" strokeWidth="1.5" />
+      <text x="806" y="62" textAnchor="middle" fontSize="8" fill="var(--muted)" fontStyle="italic">
+        Please wash your mug, Gary
       </text>
     </g>
   );
 }
 
-function Produce({ fill, units, cap, empty }: { fill: number; units: number; cap: number; empty: boolean }) {
-  const crates = [
-    [30, 200],
-    [150, 200],
-    [30, 290],
-    [150, 290],
-  ];
-  const colours = ['#c2452d', '#e08a1e', '#5d8f2f', '#9fbf3b'];
-  const per = Math.round(Math.max(0, Math.min(1, fill)) * 20);
+function Level({ x, y, w, units, cap, label, tag }: { x: number; y: number; w: number; units: number; cap: number; label: string; tag?: string }) {
+  const f = Math.max(0, Math.min(1, units / Math.max(1, cap)));
+  const word = fillWord(f);
+  const low = word === 'Empty' || word === 'Low';
   return (
     <g aria-hidden="true">
-      {crates.map(([x, y], c) => (
+      <rect x={x} y={y} width={w} height="22" rx="6" fill="var(--paper)" stroke={low ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth={low ? 2 : 1} />
+      <rect x={x + 3} y={y + 16} width={(w - 6) * f} height="3.5" rx="1.5" fill={low ? 'var(--bad)' : 'var(--good)'} />
+      <text x={x + 7} y={y + 12.5} fontSize="11" fill="var(--burgundy-dark)" fontWeight="800">
+        {label}
+        {tag && (
+          <tspan fill="var(--burgundy)" fontWeight="700">
+            {' '}
+            · {tag}
+          </tspan>
+        )}
+      </text>
+      <text x={x + w - 7} y={y + 12.5} fontSize="11" textAnchor="end" fill={low ? 'var(--bad)' : 'var(--muted)'} fontWeight="700">
+        {word === 'Empty' ? '⚠ EMPTY' : `${word} · ${Math.round(units)}`}
+      </text>
+    </g>
+  );
+}
+
+function tagFor(view: StoreView, d: DeptId): string | undefined {
+  const t = [view.markdown.includes(d) ? 'stickers' : '', view.promo.includes(d) ? 'promo' : ''].filter(Boolean).join(', ');
+  return t || undefined;
+}
+
+function Sticker({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <circle cx={x} cy={y} r="9" fill="#f2d21a" stroke="#b89a0a" />
+      <text x={x} y={y + 2.5} textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#5a4a00">
+        −35%
+      </text>
+    </g>
+  );
+}
+
+function Produce({ view }: { view: StoreView }) {
+  const f = view.shelf.produce / Math.max(1, view.shelfCap.produce);
+  const per = Math.round(Math.max(0, Math.min(1, f)) * 15);
+  const crates: [number, number, string][] = [
+    [26, 186, '#c2452d'],
+    [150, 186, '#e08a1e'],
+    [26, 252, '#5d8f2f'],
+    [150, 252, '#9fbf3b'],
+    [26, 318, '#d8b25a'],
+    [150, 318, '#8a3a6b'],
+  ];
+  return (
+    <g aria-hidden="true">
+      {crates.map(([x, y, colour], c) => (
         <g key={c}>
-          <rect x={x} y={y} width="110" height="74" rx="6" fill="var(--wood)" stroke="var(--wood-dark)" strokeWidth="2" />
+          <rect x={x - 3} y={y + 46} width="116" height="8" rx="2" fill="var(--wood-dark)" />
+          <rect x={x} y={y} width="110" height="50" rx="4" fill="var(--wood)" stroke="var(--wood-dark)" strokeWidth="2" />
+          <path d={`M${x} ${y + 17} h110 M${x} ${y + 34} h110`} stroke="var(--wood-dark)" strokeWidth="1" opacity="0.5" />
           {Array.from({ length: per }, (_, i) => (
-            <circle key={i} cx={x + 12 + (i % 5) * 21} cy={y + 62 - Math.floor(i / 5) * 16} r="8" fill={colours[c]} />
+            <circle key={i} cx={x + 13 + (i % 5) * 21} cy={y + 40 - Math.floor(i / 5) * 14} r="8" fill={colour} stroke="rgba(0,0,0,0.15)" />
           ))}
+          {view.markdown.includes('produce') && c === 0 && <Sticker x={x + 98} y={y + 8} />}
         </g>
       ))}
-      <Level x={24} y={176} w={240} fill={fill} units={units} cap={cap} label="Fruit & veg" />
-      {empty && <EmptyFlag x={140} y={240} />}
+      <Level x={20} y={158} w={256} units={view.shelf.produce} cap={view.shelfCap.produce} label="Fruit & veg" tag={tagFor(view, 'produce')} />
+      {view.emptyDepts.includes('produce') && <EmptyFlag x={145} y={290} />}
     </g>
   );
 }
 
-function Chilled({ fill, units, cap, fault, empty }: { fill: number; units: number; cap: number; fault: boolean; empty: boolean }) {
-  const cabinets = 4;
-  const per = Math.round(Math.max(0, Math.min(1, fill)) * 24);
+function Chilled({ view }: { view: StoreView }) {
+  const working = view.fridgeFault ? 2 : 4;
+  const f = view.shelf.chilled / Math.max(1, view.shelfCap.chilled);
+  const per = Math.round(Math.max(0, Math.min(1, f)) * 24);
   return (
     <g aria-hidden="true">
-      {Array.from({ length: cabinets }, (_, c) => {
-        const x = 306 + c * 160;
+      {Array.from({ length: 4 }, (_, c) => {
+        const x = 306 + c * 171;
         return (
           <g key={c}>
-            <rect x={x} y="196" width="150" height="54" rx="4" fill="var(--cold)" stroke="#6f97a8" strokeWidth="2" />
-            {Array.from({ length: Math.round(per / 1) }, (_, i) => (
-              <rect key={i} x={x + 6 + (i % 12) * 12} y={208 + Math.floor(i / 12) * 18} width="9" height="14" rx="2" className={`pack pack-${(i + c) % 3}`} />
-            ))}
+            <rect x={x} y="180" width="165" height="52" rx="4" fill="var(--cold)" stroke="#6f97a8" strokeWidth="2" />
+            <rect x={x + 3} y="183" width="159" height="4" fill="#b9d7e2" />
+            <path d={`M${x + 4} 208 h157`} stroke="#9cbccb" strokeWidth="1.5" />
+            {c < working &&
+              Array.from({ length: per }, (_, i) => (
+                <rect key={i} x={x + 8 + (i % 12) * 13} y={191 + Math.floor(i / 12) * 21} width="9" height="15" rx="2" className={`pack pack-${(i + c) % 3}`} />
+              ))}
+            <rect x={x} y="226" width="165" height="6" rx="2" fill="rgba(255,255,255,0.6)" />
           </g>
         );
       })}
-      {fault && (
+      {view.markdown.includes('chilled') && <Sticker x={466} y={194} />}
+      {view.fridgeFault && (
         <g>
-          <rect x="626" y="196" width="310" height="54" fill="url(#hatch)" />
-          <rect x="700" y="205" width="160" height="22" rx="6" fill="var(--bad)" />
-          <text x="780" y="220" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="700">
+          <rect x="648" y="180" width="336" height="52" fill="url(#hatch)" />
+          <rect x="730" y="194" width="172" height="22" rx="6" fill="var(--bad)" />
+          <text x="816" y="209" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="700">
             ⚠ CHILLER FAULT
           </text>
         </g>
       )}
-      <Level x={306} y={170} w={300} fill={units / Math.max(1, cap)} units={units} cap={cap} label={fault ? 'Chilled (half out of use)' : 'Chilled'} />
-      {empty && <EmptyFlag x={470} y={232} />}
+      <Level
+        x={306}
+        y={156}
+        w={330}
+        units={view.shelf.chilled}
+        cap={view.shelfCap.chilled}
+        label={view.fridgeFault ? 'Chilled (half out of use)' : 'Chilled'}
+        tag={tagFor(view, 'chilled')}
+      />
+      {view.emptyDepts.includes('chilled') && <EmptyFlag x={470} y={208} />}
     </g>
   );
 }
 
-function Ambient({ fill, units, cap, empty }: { fill: number; units: number; cap: number; empty: boolean }) {
-  const rows = [300, 338, 376];
-  const per = Math.round(Math.max(0, Math.min(1, fill)) * 34);
+function Groceries({ view }: { view: StoreView }) {
+  const f = view.shelf.ambient / Math.max(1, view.shelfCap.ambient);
+  const per = Math.round(Math.max(0, Math.min(1, f)) * 34);
+  const gondolas = [286, 340, 394];
+  const promo = view.promo.includes('ambient');
   return (
     <g aria-hidden="true">
-      {rows.map((y, r) => (
-        <g key={r}>
-          <rect x="330" y={y} width="590" height="22" rx="3" fill="var(--shelf)" stroke="var(--wood-dark)" />
+      {gondolas.map((y, g) => (
+        <g key={g}>
+          <rect x="344" y={y} width="608" height="24" rx="2" fill="var(--shelf)" stroke="var(--wood-dark)" />
+          <path d={`M344 ${y + 12} h608`} stroke="var(--wood-dark)" strokeWidth="1.5" />
           {Array.from({ length: per }, (_, i) => (
-            <rect key={i} x={334 + i * 17} y={y + 3} width="13" height="16" rx="2" className={`tin tin-${(i + r) % 4}`} />
+            <g key={i}>
+              <rect x={348 + i * 17.8} y={y + 1.5} width="13" height="9" rx="1.5" className={`tin tin-${(i + g) % 4}`} />
+              <rect x={348 + (33 - i) * 17.8} y={y + 13.5} width="13" height="9" rx="1.5" className={`tin tin-${(i + g + 2) % 4}`} />
+            </g>
           ))}
+          <rect x="332" y={y - 2} width="12" height="28" rx="2" fill={promo ? 'var(--mustard)' : 'var(--wood)'} />
+          <rect x="952" y={y - 2} width="12" height="28" rx="2" fill={promo ? 'var(--mustard)' : 'var(--wood)'} />
         </g>
       ))}
-      <Level x={330} y={272} w={300} fill={fill} units={units} cap={cap} label="Cupboard essentials" />
-      {empty && <EmptyFlag x={640} y={340} />}
+      {promo && (
+        <g>
+          <rect x="880" y="244" width="60" height="18" rx="4" fill="var(--mustard)" />
+          <text x="910" y="257" textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--burgundy-dark)">
+            OFFER!
+          </text>
+        </g>
+      )}
+      <Level x={330} y={242} w={300} units={view.shelf.ambient} cap={view.shelfCap.ambient} label="Cupboard essentials" tag={tagFor(view, 'ambient')} />
+      {view.emptyDepts.includes('ambient') && <EmptyFlag x={650} y={350} />}
     </g>
   );
 }
@@ -423,7 +564,7 @@ function Ambient({ fill, units, cap, empty }: { fill: number; units: number; cap
 function EmptyFlag({ x, y }: { x: number; y: number }) {
   return (
     <g>
-      <rect x={x - 52} y={y - 13} width="104" height="22" rx="11" fill="var(--bad)" />
+      <rect x={x - 54} y={y - 13} width="108" height="22" rx="11" fill="var(--bad)" />
       <text x={x} y={y + 2} textAnchor="middle" fontSize="11" fill="#fff" fontWeight="700">
         SHELF EMPTY
       </text>
@@ -431,99 +572,175 @@ function EmptyFlag({ x, y }: { x: number; y: number }) {
   );
 }
 
-function Tills({ open, queue }: { open: number; queue: number }) {
-  const tills = [410, 550, 690];
-  const shown = Math.min(36, Math.round(queue));
-  const lanes = Math.max(1, open);
+function Checkouts({ open, queue }: { open: number; queue: number }) {
   return (
     <g aria-hidden="true">
-      {tills.map((x, i) => (
-        <g key={i} opacity={i < open ? 1 : 0.5}>
-          <rect x={x} y="510" width="100" height="26" rx="5" fill="var(--wood)" stroke="var(--wood-dark)" strokeWidth="2" />
-          <rect x={x + 70} y="502" width="22" height="14" rx="2" fill="var(--ink)" />
-          <text x={x + 34} y="527" textAnchor="middle" fontSize="11" fill="var(--paper)" fontWeight="700">
-            TILL {i + 1}
-          </text>
-          {i >= open && (
-            <text x={x + 50} y="560" textAnchor="middle" fontSize="10" fill="var(--muted)">
-              closed
-            </text>
-          )}
-        </g>
-      ))}
-      {Array.from({ length: shown }, (_, i) => {
-        const lane = i % lanes;
-        const pos = Math.floor(i / lanes);
-        const x = tills[lane] + 40 - Math.min(pos, 11) * 0 + (pos > 5 ? 22 : 0);
-        const y = 492 - (pos % 6) * 14;
-        return <circle key={i} cx={x} cy={y} r="6" className="shopper queued" />;
-      })}
-      <g>
-        <rect x="812" y="476" width="126" height="40" rx="8" fill="var(--paper)" stroke={queue > 10 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="2" />
-        <text x="875" y="492" textAnchor="middle" fontSize="11" fill="var(--muted)">
-          Queue
-        </text>
-        <text x="875" y="508" textAnchor="middle" fontSize="13" fontWeight="700" fill={queue > 10 ? 'var(--bad)' : 'var(--ink)'}>
-          {Math.round(queue)} {queue > 10 ? '⚠' : ''}
-        </text>
-      </g>
-    </g>
-  );
-}
-
-function Entrance() {
-  return (
-    <g aria-hidden="true">
-      <rect x="40" y="588" width="170" height="8" fill="var(--mustard)" />
-      <rect x="56" y="556" width="138" height="28" rx="4" fill="var(--burgundy)" />
-      <text x="125" y="575" textAnchor="middle" fontSize="12" fill="var(--paper)" fontWeight="700" letterSpacing="1">
-        WAY IN · WAY OUT
-      </text>
-      <text x="125" y="548" textAnchor="middle" fontSize="10" fill="var(--muted)">
-        Please mind the step. It is famous.
-      </text>
-    </g>
-  );
-}
-
-function Shoppers({ view, motion }: { view: StoreView; motion: boolean }) {
-  // One dot per ~1.5 shoppers arriving in this ten-minute step, heading for a department.
-  const n = Math.min(12, Math.round(view.arrivals / 1.5));
-  const targets: [number, number][] = [
-    [150, 260],
-    [620, 262],
-    [620, 330],
-  ];
-  const left = Math.min(8, Math.round(view.abandoned));
-  return (
-    <g aria-hidden="true">
-      {Array.from({ length: n }, (_, i) => {
-        const t = targets[i % 3];
-        const x = t[0] + (hash(i, 1) - 0.5) * (i % 3 === 0 ? 160 : 520);
-        const y = t[1] + (hash(i, 2) - 0.5) * 40;
+      {LANE_Y.map((y, i) => {
+        const on = i < open;
         return (
-          <circle
-            key={`${view.tick}-${i}`}
-            className={`shopper ${motion ? 'walk-in' : ''}`}
-            cx={x}
-            cy={y}
-            r="7"
-            style={{ ['--sx' as string]: `${125 - x}px`, ['--sy' as string]: `${570 - y}px`, animationDelay: `${(i % 6) * 60}ms` }}
-          />
-        );
-      })}
-      {Array.from({ length: left }, (_, i) => {
-        const x = 300 + i * 14;
-        const y = 470;
-        return (
-          <g key={`${view.tick}-out-${i}`} className={motion ? 'walk-out' : ''} style={{ ['--ex' as string]: `${125 - x}px`, ['--ey' as string]: `${590 - y}px` }}>
-            <circle cx={x} cy={y} r="7" className="shopper leaving" />
-            <text x={x} y={y + 4} textAnchor="middle" fontSize="9" fill="#fff" fontWeight="700">
-              ✕
+          <g key={i} opacity={on ? 1 : 0.55}>
+            <path d={`M330 ${y + 54} H936`} stroke="var(--line-strong)" strokeWidth="2" strokeDasharray={on ? '0' : '6 4'} />
+            <rect x="820" y={y + 6} width="62" height="18" rx="3" fill="url(#belt)" />
+            <rect x="882" y={y + 4} width="52" height="22" rx="3" fill="var(--wood)" stroke="var(--wood-dark)" strokeWidth="1.5" />
+            <rect x="912" y={y - 2} width="16" height="11" rx="2" fill="var(--ink)" />
+            <rect x="914" y={y} width="12" height="6" fill={on ? '#9fd39a' : '#555'} />
+            <circle cx="808" cy={y + 15} r="9" fill={on ? 'var(--burgundy)' : 'var(--muted)'} />
+            <text x="808" y={y + 18.5} textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--paper)">
+              {i + 1}
             </text>
+            {!on && (
+              <g>
+                <path d={`M790 ${y + 26} v26`} stroke="var(--burgundy)" strokeWidth="3" />
+                <rect x="744" y={y + 28} width="68" height="16" rx="3" fill="var(--paper)" stroke="var(--burgundy)" />
+                <text x="778" y={y + 40} textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--burgundy)">
+                  TILL CLOSED
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
+      <rect x="860" y="436" width="126" height="28" rx="7" fill="var(--paper)" stroke={queue > 10 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="2" />
+      <text x="923" y="454" textAnchor="middle" fontSize="12" fontWeight="700" fill={queue > 10 ? 'var(--bad)' : 'var(--ink)'}>
+        {queue > 10 ? '⚠ ' : ''}Queue {Math.round(queue)} · {open}/3 open
+      </text>
+    </g>
+  );
+}
+
+function Entrance({ dropped }: { dropped: number }) {
+  return (
+    <g aria-hidden="true">
+      <rect x="56" y="666" width="150" height="10" fill="#cfe3ea" stroke="#8fb3c2" />
+      <rect x="66" y="624" width="130" height="34" rx="4" fill="var(--burgundy)" />
+      <text x="131" y="646" textAnchor="middle" fontSize="12" fill="var(--paper)" fontWeight="700" letterSpacing="1">
+        WAY IN · WAY OUT
+      </text>
+      <text x="131" y="616" textAnchor="middle" fontSize="9" fill="var(--muted)">
+        Please mind the step. It is famous.
+      </text>
+      {[0, 1, 2, 3].map((i) => (
+        <rect key={i} x="226" y={624 - i * 4} width="22" height="12" rx="2" fill="var(--burgundy)" opacity={0.7 + i * 0.08} stroke="var(--paper)" strokeWidth="0.8" />
+      ))}
+      <text x="237" y="652" textAnchor="middle" fontSize="8" fill="var(--muted)">
+        baskets
+      </text>
+      <rect x="24" y="490" width="250" height="88" rx="6" fill="rgba(255,255,255,0.35)" stroke="var(--line)" />
+      <text x="149" y="528" textAnchor="middle" fontSize="17" fill="var(--burgundy-dark)" fontFamily="var(--serif)" fontWeight="700">
+        Stockwell &amp; Co
+      </text>
+      <text x="149" y="548" textAnchor="middle" fontSize="9.5" fill="var(--muted)" fontStyle="italic">
+        Your neighbourhood grocer since 1987
+      </text>
+      {Array.from({ length: Math.min(10, Math.round(dropped)) }, (_, i) => (
+        <g key={i} transform={`translate(${296 + (i % 5) * 5} ${600 - Math.floor(i / 5) * 7 - (i % 2) * 2})`}>
+          <DroppedBasket />
+        </g>
+      ))}
+      {dropped >= 1 && (
+        <text x="306" y="618" textAnchor="middle" fontSize="8" fill="var(--bad)" fontWeight="700">
+          left behind
+        </text>
+      )}
+    </g>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+/** Queue split across open tills, one figure per customer (up to a lane's length). */
+function QueueFigures({ open, queue }: { open: number; queue: number }) {
+  const lanes = Math.max(1, open);
+  const total = Math.round(queue);
+  const perLane = Array.from({ length: lanes }, (_, i) => Math.floor(total / lanes) + (i < total % lanes ? 1 : 0));
+  const maxShown = 20;
+  return (
+    <g aria-hidden="true">
+      {perLane.map((n, lane) => {
+        const y = LANE_Y[Math.min(lane, 2)] + 42;
+        return (
+          <g key={lane}>
+            {Array.from({ length: Math.min(n, maxShown) }, (_, i) => (
+              <g key={i} className="queuer" style={{ transform: `translate(${QUEUE_FRONT_X - i * QUEUE_GAP}px, ${y}px)` }}>
+                <Shopper n={lane * 31 + i} fill={0.85} />
+              </g>
+            ))}
+            {n > maxShown && (
+              <text x={QUEUE_FRONT_X - maxShown * QUEUE_GAP + 4} y={y - 20} fontSize="11" fontWeight="800" fill="var(--bad)">
+                +{n - maxShown}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+const DEPT_SPOTS: Record<DeptId, { x: [number, number]; y: [number, number] }> = {
+  produce: { x: [40, 260], y: [244, 432] },
+  chilled: { x: [340, 960], y: [256, 268] },
+  ambient: { x: [380, 930], y: [334, 392] },
+};
+
+/** Shoppers arriving this step, spread across departments by basket share. */
+function AisleShoppers({ view, motion }: { view: StoreView; motion: boolean }) {
+  const n = Math.min(14, Math.round(view.arrivals / 1.2));
+  if (n <= 0) return null;
+  const weights = DEPTS.map((d) => CONFIG.departments[d].basket);
+  const sum = weights.reduce((t, x) => t + x, 0);
+  const out: ReactNode[] = [];
+  let k = 0;
+  DEPTS.forEach((d, di) => {
+    const m = di === DEPTS.length - 1 ? n - k : Math.round((n * weights[di]) / sum);
+    const spot = DEPT_SPOTS[d];
+    for (let i = 0; i < m; i++, k++) {
+      const x = spot.x[0] + hash(k, 3) * (spot.x[1] - spot.x[0]);
+      const y = d === 'ambient' ? (k % 2 ? 336 : 390) : spot.y[0] + hash(k, 5) * (spot.y[1] - spot.y[0]);
+      const empty = view.emptyDepts.includes(d);
+      out.push(
+        <g key={`${view.tick}-${k}`} transform={`translate(${x} ${y})`}>
+          <g
+            className={motion ? 'walk-in' : ''}
+            style={{ ['--sx' as string]: `${ENTRANCE[0] - x}px`, ['--sy' as string]: `${ENTRANCE[1] - y}px`, animationDelay: `${(k % 7) * 70}ms` }}
+          >
+            <Shopper n={k + 3} fill={empty ? 0.1 : 0.4 + hash(k, 9) * 0.5} puzzled={empty} />
+          </g>
+        </g>,
+      );
+    }
+  });
+  return <g aria-hidden="true">{out}</g>;
+}
+
+function WalkOuts({ view, motion }: { view: StoreView; motion: boolean }) {
+  const m = Math.min(6, Math.round(view.abandoned));
+  return (
+    <g aria-hidden="true">
+      {Array.from({ length: m }, (_, i) => {
+        const x = 340 + i * 26;
+        const y = 462;
+        return (
+          <g key={`${view.tick}-out-${i}`} transform={`translate(${x} ${y})`}>
+            <g className={motion ? 'walk-out' : ''} style={{ ['--ex' as string]: `${ENTRANCE[0] - x}px`, ['--ey' as string]: `${ENTRANCE[1] - y}px` }}>
+              <Shopper n={i + 11} leaving />
+            </g>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function ZoneBadge({ x, y, n, lim }: { x: number; y: number; n: number; lim: number }) {
+  return (
+    <g className="zone-badge" aria-hidden="true">
+      <rect x={x} y={y} width="48" height="18" rx="9" fill={n === 0 ? 'var(--paper)' : 'var(--burgundy)'} stroke="var(--burgundy)" />
+      <text x={x + 24} y={y + 13} textAnchor="middle" fontSize="10.5" fill={n === 0 ? 'var(--burgundy)' : 'var(--paper)'} fontWeight="700">
+        {n}/{lim} staff
+      </text>
     </g>
   );
 }
@@ -533,6 +750,7 @@ function StaffToken({
   a,
   x,
   y,
+  act,
   selected,
   interactive,
   onClick,
@@ -541,57 +759,63 @@ function StaffToken({
   a: AssignmentId;
   x: number;
   y: number;
+  act: Activity;
   selected: boolean;
   interactive: boolean;
   onClick: () => void;
 }) {
   const e = Math.max(0, Math.min(100, s.energy));
-  const r = 17;
-  const circ = 2 * Math.PI * (r + 4);
   const tired = productivity(s.energy) < 1;
+  const pose = act === 'plan' ? (a === 'break' ? 'sit' : a === 'tills' ? 'scan' : 'stand') : poseFor(a, act === 'work');
+  const name = s.isTemp ? 'Temp' : s.name;
+  const barColour = e < CONFIG.staff.exhaustedBelow ? 'var(--bad)' : e < CONFIG.staff.tiredBelow ? 'var(--mustard)' : 'var(--good)';
   return (
     <g
-      className={`token ${selected ? 'token-selected' : ''} ${a === 'break' ? 'token-break' : ''}`}
+      className={`token ${selected ? 'token-selected' : ''}`}
       transform={`translate(${x} ${y})`}
-      onClick={interactive ? onClick : undefined}
-      role="presentation"
+      onClick={
+        interactive
+          ? (ev) => {
+              ev.stopPropagation();
+              onClick();
+            }
+          : undefined
+      }
     >
-      <circle r={r + 4} fill="var(--paper)" stroke="var(--line)" strokeWidth="4" />
-      <circle
-        r={r + 4}
-        fill="none"
-        stroke={energyColour(e)}
-        strokeWidth="4"
-        strokeDasharray={`${(circ * e) / 100} ${circ}`}
-        transform="rotate(-90)"
-      />
-      <circle r={r} fill={s.isTemp ? 'var(--muted)' : 'var(--burgundy)'} />
-      <text y="5" textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--paper)">
-        {initials(s.name)}
-      </text>
-      <rect x="-30" y={r + 6} width="60" height="15" rx="7" fill="var(--paper)" stroke="var(--line-strong)" />
-      <text y={r + 17} textAnchor="middle" fontSize="10" fill="var(--ink)" fontWeight="700">
-        {s.name === 'Agency temp' ? 'Temp' : s.name}
-        {tired ? ' ·z' : ''}
-      </text>
-      {a === 'break' && (
-        <text x={r + 2} y={-r + 2} fontSize="14">
-          ☕
+      <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
+      {selected && <ellipse cx="0" cy="0" rx="18" ry="6" fill="none" stroke="var(--mustard)" strokeWidth="3" />}
+      <g className={act === 'work' ? 'busy' : ''}>
+        <g transform={a === 'tills' ? undefined : 'scale(1.15)'}>
+          <StaffFigure id={s.id} pose={pose} tired={tired} />
+        </g>
+      </g>
+      {act === 'idle' && a !== 'break' && <Bubble text="…" />}
+      {tired && act !== 'idle' && a !== 'break' && <Bubble text="z" tone="tired" />}
+      <g transform="translate(0 4)">
+        <rect x="-25" y="0" width="50" height="17" rx="5" fill="var(--paper)" stroke={selected ? 'var(--mustard)' : 'var(--line-strong)'} strokeWidth={selected ? 2 : 1} />
+        <text y="10" textAnchor="middle" fontSize="9.5" fill="var(--ink)" fontWeight="800">
+          {name}
         </text>
-      )}
+        <rect x="-20" y="12.5" width="40" height="2.6" rx="1.3" fill="var(--line)" />
+        <rect x="-20" y="12.5" width={(40 * e) / 100} height="2.6" rx="1.3" fill={barColour} />
+      </g>
     </g>
   );
 }
 
-export function storeViewFromState(args: {
-  shelf: Record<DeptId, number>;
-  shelfCap: Record<DeptId, number>;
-  backroom: Record<DeptId, number>;
-  dock: number;
-  queue: number;
-  fridgeFault: boolean;
-  lorry: boolean;
-  clock: string;
-}): StoreView {
-  return { ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
+function Bubble({ text, tone }: { text: string; tone?: 'tired' }) {
+  return (
+    <g className="bubble" transform="translate(12 -54)">
+      <rect x="-2" y="-9" width="16" height="13" rx="6" fill="var(--paper)" stroke={tone ? 'var(--mustard)' : 'var(--muted)'} />
+      <text x="6" y="1" textAnchor="middle" fontSize="10" fontWeight="800" fill={tone ? '#7d5c0c' : 'var(--muted)'}>
+        {text}
+      </text>
+    </g>
+  );
+}
+
+export function storeViewFromState(
+  args: Omit<StoreView, 'arrivals' | 'abandoned' | 'dropped' | 'emptyDepts' | 'tick'> & { dropped?: number },
+): StoreView {
+  return { dropped: 0, ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
 }
