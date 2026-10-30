@@ -5,7 +5,7 @@
  * are only named when the recorded figures show them.
  */
 import { CONFIG, DEPTS, deptName, hourLabel, type DeptId } from './config';
-import { inventoryValue, money, operatingProfit, satisfactionSoFar, wellbeing } from './engine';
+import { STEP_MINUTES, inventoryValue, money, operatingProfit, satisfactionSoFar, wellbeing } from './engine';
 import { total, value } from './stock';
 import type { HourReport, SimState } from './types';
 
@@ -322,7 +322,7 @@ function missedOpportunities(state: SimState, reports: HourReport[]): string[] {
     if (idle.length) hint += ` Meanwhile ${names(idle)} had little to do.`;
     out.push({
       score: x.lostShelfGap * x.price,
-      text: `${hourLabel(best.r.hour)}: ${deptName(best.d).toLowerCase()} shelves were empty for about ${x.shelfEmptySteps * 10} minutes, missing around ${Math.round(x.lostShelfGap)} sales.${hint}`,
+      text: `${hourLabel(best.r.hour)}: ${deptName(best.d).toLowerCase()} shelves were empty for about ${Math.round(x.shelfEmptySteps * STEP_MINUTES)} minutes, missing around ${Math.round(x.lostShelfGap)} sales.${hint}`,
     });
   }
 

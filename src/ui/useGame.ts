@@ -1,55 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CONFIG } from '../sim/config';
-import { defaultPlan, planErrors } from '../sim/engine';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { newRecord, rebuild, retryRecord, type GameRecord } from '../sim/game';
 import { randomSeed } from '../sim/rng';
 import { CURATED_SEED } from '../sim/scenario';
-import {
-  clearSave,
-  getStorage,
-  loadGame,
-  loadSettings,
-  saveGame,
-  saveSettings,
-  type Settings,
-} from '../sim/save';
-import type { HourPlan, HourReport, SetupPlan } from '../sim/types';
+import { clearSave, getStorage, loadGame, loadSettings, saveGame, saveSettings, type Settings } from '../sim/save';
+import type { SetupPlan } from '../sim/types';
+import { useLiveDay } from './useLiveDay';
 
-export type Phase = 'setup' | 'plan' | 'replay' | 'results' | 'closed';
+export type Phase = 'setup' | 'trading' | 'closed';
 
+/** Quick play: one Saturday, played live. Also holds the settings shared by every mode. */
 export function useGame() {
   const storage = useMemo(() => getStorage(), []);
   const initial = useMemo(() => loadGame(storage), [storage]);
   const [settings, setSettingsState] = useState<Settings>(() => loadSettings(storage));
   const [record, setRecord] = useState<GameRecord>(() => initial?.record ?? newRecord(CURATED_SEED));
-  const rebuilt = useMemo(() => rebuild(record), [record]);
-  const state = rebuilt.state;
-  /** The state before the last committed hour (shown in the status bar during the replay). */
-  const previousState = useMemo(
-    () => (record.plans.length ? rebuild({ ...record, plans: record.plans.slice(0, -1) }).state : null),
-    [record],
-  );
-  const [draft, setDraft] = useState<HourPlan | null>(() => initial?.draft ?? null);
-  const [phase, setPhase] = useState<Phase>(() => {
-    if (!initial) return 'setup';
-    if (!initial.record.setup) return 'setup';
-    if (initial.record.plans.length >= CONFIG.hours) return 'closed';
-    return 'plan';
-  });
-  const [lastReport, setLastReport] = useState<HourReport | null>(null);
+  const [session, setSession] = useState(0);
   const [saveOk, setSaveOk] = useState<boolean>(storage !== null);
-  const resumed = useRef(!!initial && !!initial.record.setup && initial.record.plans.length > 0);
 
-  // Keep a valid draft for the hour being planned.
-  useEffect(() => {
-    if (!state || state.hour >= CONFIG.hours) return;
-    if (!draft || planErrors(state, draft).some((e) => e.includes('has no job'))) setDraft(defaultPlan(state));
-  }, [state, draft]);
+  const day = useLiveDay({
+    dayKey: `${record.seed}:${session}`,
+    build: () => rebuild(record),
+    onChoices: (choices, minute) => setRecord((r) => ({ ...r, choices: [...r.choices, ...choices], minute: Math.max(r.minute, minute) })),
+    onProgress: (minute) => setRecord((r) => (r.setup && r.minute !== minute ? { ...r, minute } : r)),
+    sound: settings.sound,
+    startPaused: !!initial?.record.setup && session === 0,
+  });
+  const phase: Phase = !record.setup || !day.live ? 'setup' : day.closed ? 'closed' : 'trading';
 
-  // Autosave whenever the record or draft changes.
+  // Autosave whenever the record changes.
   useEffect(() => {
-    setSaveOk(saveGame(storage, { record, draft }));
-  }, [storage, record, draft]);
+    setSaveOk(saveGame(storage, { record }));
+  }, [storage, record]);
 
   const setSettings = useCallback(
     (s: Partial<Settings>) => {
@@ -62,77 +43,26 @@ export function useGame() {
     [storage],
   );
 
-  const confirmSetup = useCallback((setup: SetupPlan) => {
-    setRecord((r) => ({ ...r, setup, plans: [] }));
-    setDraft(null);
-    setLastReport(null);
-    setPhase('plan');
+  const restartWith = useCallback((r: GameRecord) => {
+    setRecord(r);
+    setSession((n) => n + 1);
   }, []);
-
-  const runNextHour = useCallback(() => {
-    if (!state || !draft) return;
-    if (planErrors(state, draft).length) return;
-    const next = { ...record, plans: [...record.plans, draft] };
-    const re = rebuild(next);
-    setRecord(next);
-    setLastReport(re.reports[re.reports.length - 1] ?? null);
-    setDraft(null);
-    // After the last hour the result stays up before closing; otherwise planning resumes with a dismissible summary.
-    const after = re.state && re.state.hour >= CONFIG.hours ? 'results' : 'plan';
-    setPhase(settings.skipReplay ? after : 'replay');
-  }, [state, draft, record, settings.skipReplay]);
-
-  const finishReplay = useCallback(() => setPhase(state && state.hour >= CONFIG.hours ? 'results' : 'plan'), [state]);
-
-  const continueAfterResults = useCallback(() => {
-    if (state && state.hour >= CONFIG.hours) setPhase('closed');
-    else setPhase('plan');
-  }, [state]);
-
-  const retrySameSaturday = useCallback(() => {
-    setRecord((r) => retryRecord(r));
-    setDraft(null);
-    setLastReport(null);
-    setPhase('setup');
-  }, []);
-
-  const newSaturday = useCallback(() => {
-    // The first Saturday is curated; after that, new seeds vary demand and events.
-    setRecord(newRecord(randomSeed()));
-    setDraft(null);
-    setLastReport(null);
-    setPhase('setup');
-  }, []);
-
-  const playCurated = useCallback(() => {
-    setRecord(newRecord(CURATED_SEED));
-    setDraft(null);
-    setLastReport(null);
-    setPhase('setup');
-  }, []);
-
-  const wipe = useCallback(() => {
-    clearSave(storage);
-  }, [storage]);
+  const confirmSetup = useCallback((setup: SetupPlan) => restartWith({ ...newRecord(record.seed), setup }), [record.seed, restartWith]);
+  const retrySameSaturday = useCallback((setup?: SetupPlan) => restartWith({ ...retryRecord(record), setup: setup ?? null }), [record, restartWith]);
+  // The first Saturday is curated; after that, new seeds vary demand and events.
+  const newSaturday = useCallback((setup?: SetupPlan) => restartWith({ ...newRecord(randomSeed()), setup: setup ?? null }), [restartWith]);
+  const playCurated = useCallback((setup?: SetupPlan) => restartWith({ ...newRecord(CURATED_SEED), setup: setup ?? null }), [restartWith]);
+  const wipe = useCallback(() => clearSave(storage), [storage]);
 
   return {
     settings,
     setSettings,
     record,
-    state,
-    previousState,
-    reports: rebuilt.reports,
-    draft,
-    setDraft,
+    day,
+    state: day.live?.state ?? null,
     phase,
-    setPhase,
-    lastReport,
     saveOk,
-    resumed: resumed.current,
     confirmSetup,
-    runNextHour,
-    finishReplay,
-    continueAfterResults,
     retrySameSaturday,
     newSaturday,
     playCurated,

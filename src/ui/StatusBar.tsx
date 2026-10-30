@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CONFIG, hourLabel, hourRange } from '../sim/config';
-import { money, operatingProfit, pounds, satisfactionSoFar, wellbeing } from '../sim/engine';
+import { CONFIG, hourLabel } from '../sim/config';
+import { clockLabel, money, operatingProfit, pounds, satisfactionSoFar, wellbeing } from '../sim/engine';
 import type { SimState } from '../sim/types';
 
 interface Props {
@@ -11,19 +11,17 @@ interface Props {
   saveOk: boolean;
   /** During the guided shift the bar shows the lesson instead of the day's score. */
   tutorial?: { label: string; progress: number; onExit: () => void };
-  /** In the week: today's goal, the shop's reputation, the team over the week and business value. */
+  /** In your shop: the day, the shop's reputation, the team and business value (no targets). */
   campaign?: CampaignStatus;
+  /** The mute button. */
+  sound?: { on: boolean; toggle: () => void };
 }
 
 export interface CampaignStatus {
   day: string;
-  profitTarget: number;
   reputation: number;
-  reputationMin: number;
   teamWellbeing: number;
-  wellbeingMin: number;
   value: number;
-  valueTarget: number;
 }
 
 export function Brand({ small }: { small?: boolean }) {
@@ -49,12 +47,13 @@ const EXPLAIN: Record<StatKey, string> = {
   profit: 'Takings minus the cost of goods sold, waste, wages and other costs so far. Unsold stock is not a cost.',
   satisfaction: 'How customers feel on average today: whether they found what they wanted, how long they queued, and prices.',
   wellbeing: 'How the team is holding up across the whole shift. Long stretches without a break leave a mark.',
-  value: 'Cash, plus stock at what it cost, plus equipment at what you paid, minus any overdraft. The week’s goal is to finish Saturday with more than you started.',
+  value: 'Cash, plus stock at what it cost, plus equipment at what you paid, minus any overdraft and anything owed to the wholesaler.',
 };
 
 const CAMPAIGN_EXPLAIN: Partial<Record<StatKey, string>> = {
   satisfaction: 'The shop’s reputation. Each day moves it part of the way towards how customers felt that day; it sets how many come in.',
-  wellbeing: 'The team over the week. Overnight rest restores energy, but long days without breaks build up and show here.',
+  wellbeing: 'The team over recent days. Overnight rest restores energy, but long days without breaks build up and show here.',
+  profit: 'Takings minus the cost of goods sold, waste, wages and other costs so far today. Unsold stock is not a cost.',
 };
 
 function Indicator({
@@ -100,8 +99,8 @@ function Indicator({
         )}
       </button>
       {open && (
-        <div className="ind-pop" id={`ind-${k}`} role="region" aria-label={`${label} target`}>
-          <strong>Target: {target}</strong>
+        <div className="ind-pop" id={`ind-${k}`} role="region" aria-label={target ? `${label} target` : label}>
+          {target && <strong>Target: {target}</strong>}
           <span>{status}</span>
           <p>{explain ?? EXPLAIN[k]}</p>
         </div>
@@ -110,7 +109,7 @@ function Indicator({
   );
 }
 
-export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial, campaign }: Props) {
+export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial, campaign, sound }: Props) {
   const T = CONFIG.targets;
   const [open, setOpen] = useState<StatKey | null>(null);
   useEffect(() => {
@@ -129,7 +128,7 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
   }, [open]);
   const toggle = (k: StatKey) => setOpen((o) => (o === k ? null : k));
   const closed = !!state && state.hour >= state.ctx.hours;
-  const profitTarget = campaign?.profitTarget ?? T.operatingProfit;
+  const profitTarget = T.operatingProfit;
   return (
     <header className="statusbar">
       <Brand />
@@ -147,38 +146,52 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
       {state && (
         <div className="stats" aria-label="Shop status">
           <div className="stat">
-            <span className="stat-label">{campaign ? campaign.day : 'Time'}</span>
-            <span className="stat-value">{state.hour >= state.ctx.hours ? 'Closed' : hourRange(state.hour)}</span>
+            <span className="stat-label">{campaign ? campaign.day : 'Saturday'}</span>
+            <span className="stat-value stat-clock">{state.hour >= state.ctx.hours ? 'Closed' : clockLabel(state.hour, state.step ?? 0)}</span>
           </div>
           <div className="stat">
             <span className="stat-label">Cash</span>
             <span className="stat-value">{money(state.cash)}</span>
           </div>
-          <Indicator
-            k="profit"
-            label={campaign ? 'Today' : 'Profit'}
-            value={`${money(operatingProfit(state))} / ${pounds(profitTarget)}`}
-            target={`${money(profitTarget)} profit or more by ${hourLabel(state.ctx.hours)}`}
-            ok={closed ? operatingProfit(state) >= profitTarget : null}
-            progress={operatingProfit(state) / Math.max(1, profitTarget)}
-            status={
-              closed
-                ? operatingProfit(state) >= profitTarget
-                  ? 'Target met'
-                  : 'Target missed'
-                : `${money(Math.max(0, profitTarget - operatingProfit(state)))} to go · ${state.ctx.hours - state.hour} hours left`
-            }
-            open={open === 'profit'}
-            onToggle={() => toggle('profit')}
-          />
+          {campaign ? (
+            <Indicator
+              k="profit"
+              label="Today"
+              value={money(operatingProfit(state))}
+              target=""
+              ok={null}
+              status={closed ? 'The day is done.' : `Closes at ${hourLabel(state.ctx.hours)}`}
+              explain={CAMPAIGN_EXPLAIN.profit}
+              open={open === 'profit'}
+              onToggle={() => toggle('profit')}
+            />
+          ) : (
+            <Indicator
+              k="profit"
+              label="Profit"
+              value={`${money(operatingProfit(state))} / ${pounds(profitTarget)}`}
+              target={`${money(profitTarget)} profit or more by ${hourLabel(state.ctx.hours)}`}
+              ok={closed ? operatingProfit(state) >= profitTarget : null}
+              progress={operatingProfit(state) / Math.max(1, profitTarget)}
+              status={
+                closed
+                  ? operatingProfit(state) >= profitTarget
+                    ? 'Target met'
+                    : 'Target missed'
+                  : `${money(Math.max(0, profitTarget - operatingProfit(state)))} to go · closes at ${hourLabel(state.ctx.hours)}`
+              }
+              open={open === 'profit'}
+              onToggle={() => toggle('profit')}
+            />
+          )}
           {campaign ? (
             <>
               <Indicator
                 k="satisfaction"
                 label="Reputation"
                 value={`${Math.round(campaign.reputation)}`}
-                target={`${campaign.reputationMin} or more on Saturday night`}
-                ok={campaign.reputation >= campaign.reputationMin}
+                target=""
+                ok={null}
                 status={`Today so far: ${Math.round(satisfactionSoFar(state))}`}
                 explain={CAMPAIGN_EXPLAIN.satisfaction}
                 open={open === 'satisfaction'}
@@ -188,8 +201,8 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
                 k="wellbeing"
                 label="Team"
                 value={`${Math.round(campaign.teamWellbeing)}`}
-                target={`${campaign.wellbeingMin} or more on Saturday night`}
-                ok={campaign.teamWellbeing >= campaign.wellbeingMin}
+                target=""
+                ok={null}
                 status={`Today so far: ${Math.round(wellbeing(state))}`}
                 explain={CAMPAIGN_EXPLAIN.wellbeing}
                 open={open === 'wellbeing'}
@@ -197,12 +210,11 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
               />
               <Indicator
                 k="value"
-                label="Week"
-                value={`${pounds(campaign.value)} / ${pounds(campaign.valueTarget)}`}
-                target={`Business value ${money(campaign.valueTarget)} or more on Saturday night`}
+                label="Business"
+                value={pounds(campaign.value)}
+                target=""
                 ok={null}
-                progress={campaign.value / Math.max(1, campaign.valueTarget)}
-                status={`${money(Math.max(0, campaign.valueTarget - campaign.value))} to go`}
+                status={'Business value now'}
                 open={open === 'value'}
                 onToggle={() => toggle('value')}
               />
@@ -239,6 +251,11 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
             Autosave unavailable
           </span>
         )}
+        {sound && (
+          <button type="button" className="btn-ghost sound-btn" onClick={sound.toggle} aria-pressed={!sound.on} aria-label={sound.on ? 'Sound on. Mute' : 'Sound muted. Turn sound on'} title={sound.on ? 'Mute' : 'Sound on'}>
+            <SpeakerIcon on={sound.on} /> {sound.on ? 'Sound' : 'Muted'}
+          </button>
+        )}
         <button type="button" className="btn-ghost" onClick={onHelp}>
           How to play
         </button>
@@ -250,5 +267,18 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
         </button>
       </nav>
     </header>
+  );
+}
+
+function SpeakerIcon({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" style={{ verticalAlign: '-3px' }}>
+      <path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor" />
+      {on ? (
+        <path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6 6 0 0 1 0 9" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      ) : (
+        <path d="M13 7.5l4.5 5M17.5 7.5l-4.5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      )}
+    </svg>
   );
 }

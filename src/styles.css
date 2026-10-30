@@ -3681,3 +3681,120 @@ ul.tannoy {
 .order-edit .qty-row.small input {
   width: 58px;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Live play: walking, dragging, coin pops, the clock controls               */
+/* ------------------------------------------------------------------------ */
+.token-walk {
+  transition: transform 900ms ease-in-out;
+}
+.token-interactive {
+  touch-action: none;
+}
+.token-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.is-dragging,
+.is-dragging .zone {
+  cursor: grabbing;
+}
+.zone-drop {
+  fill: rgba(227, 178, 60, 0.28) !important;
+  stroke: var(--mustard) !important;
+  stroke-width: 4 !important;
+}
+.coin-pop {
+  animation: coin-pop 1100ms ease-out both;
+}
+@keyframes coin-pop {
+  0% {
+    transform: translateY(6px) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(0) scale(1.1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-34px) scale(1);
+    opacity: 0;
+  }
+}
+.clock-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clock-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.15rem;
+  min-width: 3.4em;
+  text-align: center;
+  color: var(--burgundy-dark);
+}
+.clock-btn {
+  min-width: 44px;
+  min-height: 40px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+.clock-btn:hover {
+  border-color: var(--burgundy);
+}
+.clock-btn[aria-pressed='true'] {
+  background: var(--burgundy);
+  border-color: var(--burgundy-dark);
+  color: #fff;
+}
+.clock-btn.play {
+  min-width: 108px;
+  background: var(--mustard);
+  border-color: #9a6f12;
+}
+.clock-btn.play.running {
+  background: var(--paper);
+  border-color: var(--line-strong);
+}
+.clock-speeds {
+  display: inline-flex;
+  gap: 4px;
+}
+.stage-chip.stage-paused {
+  top: 10px;
+  bottom: auto;
+  left: 50%;
+  width: auto;
+  height: auto;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  background: var(--mustard);
+  color: var(--ink);
+  font-weight: 800;
+}
+.closing-time {
+  background: var(--burgundy);
+  color: #fff;
+}
+.store {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.credit-note {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--burgundy-dark);
+}
+.indicators li.plain .ind-value {
+  color: var(--ink);
+}

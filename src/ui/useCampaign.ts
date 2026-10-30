@@ -1,126 +1,81 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { defaultPlan, planErrors } from '../sim/engine';
-import { newCampaignRecord, rebuildCampaign, restartDay, type CampaignRecord, type UpgradeId } from '../sim/campaign';
+import { afterClose, newCampaignRecord, nextDay, phaseOf, replayToday, restartDay, type CampaignRecord, type UpgradeId } from '../sim/campaign';
 import { randomSeed } from '../sim/rng';
 import { clearCampaign, loadCampaign, saveCampaign, type StorageLike } from '../sim/save';
-import type { HourPlan, SetupPlan } from '../sim/types';
+import type { SetupPlan } from '../sim/types';
+import { useLiveDay } from './useLiveDay';
 
-/** The seed of the first week (later weeks get a new one). */
-export const FIRST_WEEK_SEED = 1;
+/** The seed of a new shop. */
+export const FIRST_SEED = 1;
 
-export type CampaignView = 'morning' | 'plan' | 'replay' | 'closed' | 'finished' | 'failed';
-
-export function useCampaign(storage: StorageLike | null, skipReplay: boolean) {
+/** The shop, day after day: the morning order, the live day, and closing with investments. */
+export function useCampaign(storage: StorageLike | null, sound: boolean) {
   const initial = useMemo(() => loadCampaign(storage), [storage]);
-  const [record, setRecord] = useState<CampaignRecord>(() => initial.file?.record ?? newCampaignRecord(FIRST_WEEK_SEED));
-  const [draft, setDraft] = useState<HourPlan | null>(() => initial.file?.draft ?? null);
-  const [replaying, setReplaying] = useState(false);
+  const [record, setRecord] = useState<CampaignRecord>(() => initial.file?.record ?? newCampaignRecord(FIRST_SEED));
+  const [session, setSession] = useState(0);
   const [notice, setNotice] = useState<string | null>(initial.problem);
   const [saveOk, setSaveOk] = useState(storage !== null);
-  const rb = useMemo(() => rebuildCampaign(record), [record]);
-  const state = rb.state;
-  const view: CampaignView = replaying && rb.reports.length ? 'replay' : rb.phase === 'trading' ? 'plan' : rb.phase;
-  const started = record.days.length > 0;
 
-  // Keep a valid plan for the hour being planned.
+  const day = useLiveDay({
+    dayKey: `${record.seed}:${record.camp.day}:${session}`,
+    build: () => replayToday(record),
+    onChoices: (choices, minute) =>
+      setRecord((r) => (r.today ? { ...r, today: { ...r.today, choices: [...r.today.choices, ...choices], minute: Math.max(r.today.minute, minute) } } : r)),
+    onProgress: (minute) => setRecord((r) => (r.today && r.today.minute !== minute ? { ...r, today: { ...r.today, minute } } : r)),
+    sound,
+    startPaused: !!initial.file?.record.today && session === 0,
+  });
+  const phase = phaseOf(record, day.live);
+  const closed = useMemo(() => (phase === 'closed' && day.live ? afterClose(record, day.live.state) : null), [phase, day.live, record]);
+
   useEffect(() => {
-    if (rb.phase !== 'trading' || !state) return;
-    if (!draft || planErrors(state, draft).some((e) => e.includes('has no job') || e.includes('room for') || e.includes('doesn’t have'))) setDraft(defaultPlan(state));
-  }, [rb.phase, state, draft]);
+    setSaveOk(saveCampaign(storage, { record }));
+  }, [storage, record]);
 
-  useEffect(() => {
-    setSaveOk(saveCampaign(storage, { record, draft }));
-  }, [storage, record, draft]);
+  const begin = useCallback((r: CampaignRecord) => {
+    setRecord(r);
+    setSession((n) => n + 1);
+  }, []);
 
-  const update = useCallback((f: (r: CampaignRecord) => CampaignRecord) => setRecord((r) => f(structuredClone(r))), []);
-
-  const openShop = useCallback(
-    (setup: SetupPlan) => {
-      update((r) => {
-        r.days.push({ setup, plans: [], purchases: [], done: false });
-        return r;
-      });
-      setDraft(null);
-    },
-    [update],
-  );
-
-  const runNextHour = useCallback(() => {
-    if (!state || !draft || planErrors(state, draft).length) return;
-    const plan = draft;
-    update((r) => {
-      r.days[r.days.length - 1].plans.push(plan);
-      return r;
-    });
-    setDraft(null);
-    setReplaying(!skipReplay);
-  }, [state, draft, update, skipReplay]);
-
-  const finishReplay = useCallback(() => setReplaying(false), []);
-
-  const purchase = useCallback(
-    (id: UpgradeId) =>
-      update((r) => {
-        r.days[r.days.length - 1].purchases.push(id);
-        return r;
-      }),
-    [update],
-  );
+  const openShop = useCallback((setup: SetupPlan) => begin({ ...record, today: { setup, choices: [], minute: 0 }, purchases: [] }), [record, begin]);
+  const purchase = useCallback((id: UpgradeId) => setRecord((r) => ({ ...r, purchases: [...r.purchases, id] })), []);
   const undoPurchase = useCallback(
-    (id: UpgradeId) =>
-      update((r) => {
-        const d = r.days[r.days.length - 1];
-        // Undoing the chilled department also undoes what depends on it.
-        const deps: string[] = id === 'chilled' ? ['chilled', 'shelfChilled', 'fridge'] : [id];
-        d.purchases = d.purchases.filter((x) => !deps.includes(x));
-        return r;
-      }),
-    [update],
+    // Undoing the chilled department also undoes what depends on it.
+    (id: UpgradeId) => setRecord((r) => ({ ...r, purchases: r.purchases.filter((x) => !(id === 'chilled' ? ['chilled', 'shelfChilled', 'fridge'] : [id]).includes(x)) })),
+    [],
   );
-
-  const continueDay = useCallback(
-    () =>
-      update((r) => {
-        r.days[r.days.length - 1].done = true;
-        return r;
-      }),
-    [update],
+  const continueDay = useCallback(() => {
+    if (day.live && phase === 'closed') begin(nextDay(record, day.live.state));
+  }, [day.live, phase, record, begin]);
+  const restart = useCallback(() => begin(restartDay(record)), [record, begin]);
+  const newShop = useCallback(
+    (seed?: number) => {
+      clearCampaign(storage);
+      begin(newCampaignRecord(seed ?? randomSeed()));
+    },
+    [storage, begin],
   );
-
-  const restart = useCallback(() => {
-    update((r) => restartDay(r));
-    setDraft(null);
-    setReplaying(false);
-  }, [update]);
-
-  const newWeek = useCallback((seed?: number) => {
-    clearCampaign(storage);
-    setRecord(newCampaignRecord(seed ?? randomSeed()));
-    setDraft(null);
-    setReplaying(false);
-  }, [storage]);
 
   return {
     record,
-    rb,
-    state,
-    view,
-    started,
-    draft,
-    setDraft,
+    day,
+    phase,
+    /** The campaign this morning (before the order). */
+    camp: record.camp,
+    /** After closing: the campaign with today and the purchases since applied, and today's result. */
+    closed,
+    state: day.live?.state ?? null,
+    started: record.camp.day > 0 || !!record.today,
     saveOk,
     notice,
     dismissNotice: () => setNotice(null),
     openShop,
-    runNextHour,
-    finishReplay,
     purchase,
     undoPurchase,
     continueDay,
     restart,
-    newWeek,
-    /** Purchases made since the last close (can still be undone). */
-    pending: record.days.at(-1)?.done === false && rb.phase === 'closed' ? record.days.at(-1)!.purchases : [],
+    newShop,
+    pending: phase === 'closed' ? record.purchases : [],
   };
 }
 

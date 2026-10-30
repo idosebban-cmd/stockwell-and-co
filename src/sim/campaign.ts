@@ -1,15 +1,14 @@
 /**
- * The seven-day campaign: Sunday to Saturday in one shop.
+ * The shop, day after day: Sunday to Saturday and round again, with no end.
  *
  * Persistent state (`CampaignState`) is what carries from one day to the next:
  * cash, stock with its dates, staff and their fatigue, installed equipment,
- * reputation and the week's results. Each trading day is an ordinary
- * `SimState` built from it by `startCampaignDay` and run by the same engine as
- * Quick play. `finishDay` folds the closed day back into the campaign.
+ * reputation and each day's results. Each trading day is an ordinary
+ * `SimState` built from it by `startCampaignDay` and played live by the same
+ * engine as Quick play (`live.ts`). `finishDay` folds the closed day back in.
  *
- * Like a single game, the campaign is stored as decisions (each day's order,
- * hourly plans and purchases) and rebuilt by replaying them, so restarting a
- * day is exact and the same choices always give the same week.
+ * The save is the campaign at the start of the current day plus that day's
+ * order and minute-stamped choices, so restarting a day is exact.
  */
 import { CONFIG, DEPTS, type CampaignDayConfig, type DeptId, type PriceTier } from './config';
 import {
@@ -21,8 +20,6 @@ import {
   money,
   operatingProfit,
   perDept,
-  pounds,
-  runHour,
   satisfactionSoFar,
   startShift,
   tierDemand,
@@ -34,11 +31,13 @@ import {
 import { makeStaff, ROSTER, SPECIALITY_TEXT } from './roster';
 import { mulberry32, signed } from './rng';
 import * as S from './stock';
-import type { Batch, DayContext, HourPlan, HourReport, Scenario, SetupPlan, SimState } from './types';
+import { choicesFromHourlyPlans, isClosed, replayLive, type Choice, type Live } from './live';
+import type { ActionRequest, Batch, DayContext, HourPlan, HourReport, Scenario, SetupPlan, SimState } from './types';
 
 const C = CONFIG;
 const K = C.campaign;
-export const CAMPAIGN_DAYS = K.days.length;
+/** Days in the weekly cycle. */
+export const WEEK_DAYS = K.days.length;
 
 export type UpgradeKey = Exclude<keyof typeof K.upgrades, 'hire'>;
 export type UpgradeId = UpgradeKey | `hire:${string}`;
@@ -61,15 +60,13 @@ export interface DayResult {
   reputationBefore: number;
   reputationAfter: number;
   wellbeing: number;
-  target: number;
-  met: boolean;
   cashEnd: number;
   valueEnd: number;
 }
 
 export interface CampaignState {
   seed: number;
-  /** The next day to trade (0 = Sunday). `CAMPAIGN_DAYS` = the week is over. */
+  /** The next day to trade (0 = the first Sunday; the weekday is day % 7). */
   day: number;
   cash: number;
   /** Stock at closing; dates are hours from the next opening. */
@@ -85,8 +82,8 @@ export interface CampaignState {
   pricing: Record<DeptId, PriceTier>;
   startValue: number;
   results: DayResult[];
-  /** Why the campaign cannot continue, if so. */
-  failed: string | null;
+  /** Owed to the wholesaler for stock bought on account. */
+  credit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,14 +116,33 @@ export function newCampaign(seed: number): CampaignState {
     pricing: { produce: 'regular', chilled: 'regular', ambient: 'regular' },
     startValue: 0,
     results: [],
-    failed: null,
+    credit: 0,
   };
   camp.startValue = businessValue(camp).total;
   return camp;
 }
 
 export function dayConfig(day: number): CampaignDayConfig {
-  return K.days[Math.min(day, CAMPAIGN_DAYS - 1)];
+  return K.days[((day % WEEK_DAYS) + WEEK_DAYS) % WEEK_DAYS];
+}
+
+/** Whole weeks played before this day. */
+export function weekOf(day: number): number {
+  return Math.floor(day / WEEK_DAYS);
+}
+
+/** More shoppers each week, as word gets round. */
+export function demandGrowth(day: number): number {
+  return 1 + Math.min(K.maxGrowth, weekOf(day) * K.weeklyGrowth);
+}
+
+/** Actions unlocked by this day. */
+export function dayActions(day: number): ActionRequest['kind'][] {
+  return (Object.entries(K.unlocks.actions) as [ActionRequest['kind'], number][]).filter(([, from]) => day >= from).map(([a]) => a);
+}
+
+export function isGenerous(day: number): boolean {
+  return day < K.generous.days;
 }
 
 export function owns(camp: CampaignState, id: UpgradeId): boolean {
@@ -159,7 +175,7 @@ export function dayContext(camp: CampaignState): DayContext {
   if (running > 0) overheads.Refrigeration = running;
   return {
     mode: 'campaign',
-    weekday: camp.day,
+    weekday: camp.day % WEEK_DAYS,
     hours: cfg.hours,
     depts,
     tills: K.startTills + (owns(camp, 'till3') ? 1 : 0),
@@ -171,8 +187,9 @@ export function dayContext(camp: CampaignState): DayContext {
     middayHour: cfg.middayHour,
     reputationFootfall: 1,
     overheads,
-    actions: cfg.actions.filter((a) => (a === 'repair' ? depts.includes('chilled') : true)),
-    pricing: cfg.pricing,
+    actions: dayActions(camp.day).filter((a) => (a === 'repair' ? depts.includes('chilled') : true)),
+    pricing: camp.day >= K.unlocks.pricing,
+    patienceBonus: isGenerous(camp.day) ? K.generous.patienceBonusMinutes : 0,
   };
 }
 
@@ -187,7 +204,7 @@ export function dayScenario(camp: CampaignState): Scenario {
   const cfg = dayConfig(camp.day);
   const rng = mulberry32(camp.seed * 1009 + camp.day * 7919 + 17);
   const n = cfg.hours;
-  const rep = reputationFootfall(camp.reputation);
+  const rep = reputationFootfall(camp.reputation) * demandGrowth(camp.day);
   const noise = (amount: number) => Array.from({ length: n }, () => 1 + signed(rng) * amount);
   const customerNoise = noise(C.demand.customerNoise);
   const deptNoise = perDept(() => noise(C.demand.deptNoise));
@@ -243,7 +260,7 @@ export function carriedQty(camp: CampaignState): Record<DeptId, number> {
 
 export function dayIntro(camp: CampaignState, scenario: Scenario): string[] {
   const cfg = dayConfig(camp.day);
-  const out = [`${weekdayName(camp.day)}: open ${cfg.hours} hours, until ${String(9 + cfg.hours).padStart(2, '0')}:00. Today’s goal: ${pounds(cfg.profitTarget)} profit.`, cfg.intro];
+  const out = [`${weekdayName(camp.day)}: open ${cfg.hours} hours, until ${String(9 + cfg.hours).padStart(2, '0')}:00.`, camp.day < WEEK_DAYS ? cfg.intro : cfg.later];
   if (scenario.events.some((e) => e.kind === 'fridgeFault')) out.push('The chiller compressor is rattling. The engineer is on call if it gives up.');
   return out;
 }
@@ -256,6 +273,7 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
     ctx: dayContext(camp),
     cash: camp.cash,
     overdraft: K.overdraftLimit,
+    credit: { owed: camp.credit, limit: K.supplierCredit.limit },
     carried: carriedFor(camp),
     staff: campaignStaff(camp),
     setup,
@@ -267,9 +285,14 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
 // Recommended order
 // ---------------------------------------------------------------------------
 
-/** What an order can draw on: cash plus the unused overdraft. */
+/** What an order can draw on: cash plus the unused overdraft, then the wholesaler's account. */
 export function orderFunds(camp: CampaignState): number {
-  return camp.cash + K.overdraftLimit;
+  return Math.max(0, camp.cash + K.overdraftLimit) + creditRoom(camp);
+}
+
+/** How much more stock the wholesaler will put on account. */
+export function creditRoom(camp: CampaignState): number {
+  return Math.max(0, K.supplierCredit.limit - camp.credit);
 }
 
 /** Estimated wages and day costs, for keeping cash back. */
@@ -345,7 +368,6 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
   const reputation = camp.reputation + (sat - camp.reputation) * K.reputation.pull;
   const reports = state.history;
   const profit = operatingProfit(state);
-  const cfg = dayConfig(camp.day);
   const next: CampaignState = {
     ...camp,
     day: camp.day + 1,
@@ -354,8 +376,8 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
     staff,
     reputation,
     pricing: { ...state.pricing },
+    credit: state.credit ?? 0,
   };
-  if (next.cash < -K.overdraftLimit) next.failed = `Cash is ${money(next.cash)}, beyond the bank’s ${money(K.overdraftLimit)} overdraft.`;
   const result: DayResult = {
     day: camp.day,
     profit,
@@ -368,8 +390,6 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
     reputationBefore: camp.reputation,
     reputationAfter: reputation,
     wellbeing: wellbeing(state),
-    target: cfg.profitTarget,
-    met: profit >= cfg.profitTarget,
     cashEnd: state.cash,
     valueEnd: 0,
   };
@@ -388,7 +408,7 @@ export interface ValueBreakdown {
   inventory: number;
   /** Equipment bought, at purchase cost. */
   equipment: number;
-  /** Overdraft (cash below zero). */
+  /** Overdraft (cash below zero) and anything owed to the wholesaler. */
   debt: number;
   total: number;
 }
@@ -399,35 +419,14 @@ export function businessValue(camp: CampaignState): ValueBreakdown {
     const st = camp.stock[d];
     inventory += S.value(st.shelf) + S.value(st.backroom) + S.value(st.dock);
   }
-  const debt = Math.max(0, -camp.cash);
+  const debt = Math.max(0, -camp.cash) + camp.credit;
   const cash = Math.max(0, camp.cash);
   return { cash, inventory, equipment: camp.equipment, debt, total: cash + inventory + camp.equipment - debt };
 }
 
 /** Business value during a day (live state), for the status bar. */
 export function liveValue(camp: CampaignState, state: SimState): number {
-  return state.cash + inventoryValue(state) + camp.equipment;
-}
-
-export interface CampaignGoal {
-  value: number;
-  target: number;
-  reputation: number;
-  wellbeing: number;
-  met: { value: boolean; reputation: boolean; wellbeing: boolean };
-}
-
-export function campaignGoal(camp: CampaignState): CampaignGoal {
-  const value = businessValue(camp).total;
-  const target = camp.startValue + K.objective.growth;
-  const wb = teamWellbeing(camp.staff);
-  return {
-    value,
-    target,
-    reputation: camp.reputation,
-    wellbeing: wb,
-    met: { value: value >= target, reputation: camp.reputation >= K.objective.reputation, wellbeing: wb >= K.objective.wellbeing },
-  };
+  return state.cash + inventoryValue(state) + camp.equipment - (state.credit ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +460,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
     out.push({ id, ...o, available: reason === null, reason, cashAfter: camp.cash - o.cost });
   };
   const tooEarly = (from: number) => (camp.day < from + 1 ? `Available from ${weekdayName(from + 1)}.` : null);
-  const ended = camp.day >= CAMPAIGN_DAYS ? 'The week is over.' : null;
+  const ended: string | null = null;
 
   for (const id of K.hireable) {
     const r = ROSTER.find((x) => x.id === id)!;
@@ -598,85 +597,92 @@ export function buy(camp: CampaignState, id: UpgradeId): CampaignState {
 }
 
 // ---------------------------------------------------------------------------
-// The record of decisions, and rebuilding from it
+// The save: the campaign at the start of today, plus today's play
 // ---------------------------------------------------------------------------
 
-export const CAMPAIGN_VERSION = 1;
+/** Version 2: a snapshot of the shop each morning plus the day's minute-stamped choices (version 1 replayed every day's hourly plans). */
+export const CAMPAIGN_VERSION = 2;
 
-export interface CampaignDayRecord {
-  setup: SetupPlan | null;
-  plans: HourPlan[];
-  /** Bought after this day closed. */
-  purchases: UpgradeId[];
-  /** The player has moved on to the next day. */
-  done: boolean;
+export interface CampaignDayPlay {
+  setup: SetupPlan;
+  choices: Choice[];
+  /** Minutes played (steps since opening). */
+  minute: number;
 }
 
 export interface CampaignRecord {
   version: number;
   seed: number;
-  days: CampaignDayRecord[];
-}
-
-export type CampaignPhase = 'morning' | 'trading' | 'closed' | 'finished' | 'failed';
-
-export interface RebuiltCampaign {
-  phase: CampaignPhase;
-  /** Campaign state at the start of the current day (or after it, once closed). */
+  /** The shop at the start of the current day, before the morning order. */
   camp: CampaignState;
-  /** Campaign state when the current day began (for restarting it). */
-  dayStart: CampaignState;
-  /** The current day's shift, if it has started. */
-  state: SimState | null;
-  reports: HourReport[];
-  /** Result of the day just closed (phase 'closed'), or the last day. */
-  result: DayResult | null;
-  /** The shift before the last committed hour (for the replay's status bar). */
-  previousState: SimState | null;
+  /** Today's order and play, once the shop has opened. */
+  today: CampaignDayPlay | null;
+  /** Bought after today closed (can still be undone until the next day starts). */
+  purchases: UpgradeId[];
 }
+
+export type CampaignPhase = 'morning' | 'trading' | 'closed';
 
 export function newCampaignRecord(seed: number): CampaignRecord {
-  return { version: CAMPAIGN_VERSION, seed, days: [] };
+  return { version: CAMPAIGN_VERSION, seed, camp: newCampaign(seed), today: null, purchases: [] };
 }
 
-export function rebuildCampaign(record: CampaignRecord): RebuiltCampaign {
-  let camp = newCampaign(record.seed);
-  for (let i = 0; i < CAMPAIGN_DAYS; i++) {
-    const rec = record.days[i];
-    const dayStart = camp;
-    if (!rec || !rec.setup) return { phase: 'morning', camp, dayStart, state: null, reports: [], result: camp.results.at(-1) ?? null, previousState: null };
-    let state = startCampaignDay(camp, rec.setup);
-    let previousState: SimState | null = null;
-    const reports: HourReport[] = [];
-    for (const plan of rec.plans.slice(0, state.ctx.hours)) {
-      previousState = state;
-      const r = runHour(state, plan);
-      state = r.state;
-      reports.push(r.report);
+/** Today's play rebuilt from the save. */
+export function replayToday(record: CampaignRecord): Live | null {
+  if (!record.today) return null;
+  return replayLive(startCampaignDay(record.camp, record.today.setup), record.today.choices, record.today.minute);
+}
+
+export interface AfterClose {
+  /** Campaign after the day and the purchases made since. */
+  camp: CampaignState;
+  result: DayResult;
+}
+
+/** The campaign once today has closed, with the purchases made since applied. */
+export function afterClose(record: CampaignRecord, closed: SimState): AfterClose {
+  const done = finishDay(record.camp, closed);
+  let camp = done.camp;
+  for (const p of record.purchases) {
+    // A purchase that no longer applies (e.g. its prerequisite was undone) is skipped.
+    try {
+      camp = buy(camp, p);
+    } catch {
+      /* skipped */
     }
-    if (state.hour < state.ctx.hours) return { phase: 'trading', camp, dayStart, state, reports, result: null, previousState };
-    const done = finishDay(camp, state);
-    let after = done.camp;
-    for (const p of rec.purchases) {
-      // A purchase that no longer applies (e.g. its prerequisite was undone) is skipped.
-      try {
-        after = buy(after, p);
-      } catch {
-        /* skipped */
-      }
-    }
-    if (after.failed) return { phase: 'failed', camp: after, dayStart, state, reports, result: done.result, previousState };
-    if (!rec.done) return { phase: 'closed', camp: after, dayStart, state, reports, result: done.result, previousState };
-    camp = after;
   }
-  return { phase: 'finished', camp, dayStart: camp, state: null, reports: [], result: camp.results.at(-1) ?? null, previousState: null };
+  return { camp, result: done.result };
 }
 
-/** The record with the current day cleared, so it can be played again from its morning. */
+/** Moves on to the next morning. */
+export function nextDay(record: CampaignRecord, closed: SimState): CampaignRecord {
+  return { ...record, camp: afterClose(record, closed).camp, today: null, purchases: [] };
+}
+
+/** Today undone: back to this morning, before the order. */
 export function restartDay(record: CampaignRecord): CampaignRecord {
-  const idx = record.days.findIndex((d) => !d.done);
-  if (idx < 0) return record;
-  return { ...record, days: record.days.slice(0, idx) };
+  return { ...record, today: null, purchases: [] };
+}
+
+export function phaseOf(record: CampaignRecord, live: Live | null): CampaignPhase {
+  if (!record.today || !live) return 'morning';
+  return isClosed(live) ? 'closed' : 'trading';
+}
+
+/** Version 1 saves: replays the old week of hourly plans into a version 2 save. */
+export function convertCampaignV1(old: { seed: number; days: { setup: SetupPlan | null; plans: HourPlan[]; purchases: UpgradeId[]; done: boolean }[] }): CampaignRecord {
+  let record = newCampaignRecord(old.seed);
+  for (const d of old.days) {
+    if (!d.setup) break;
+    const hours = dayConfig(record.camp.day).hours;
+    const today: CampaignDayPlay = { setup: d.setup, choices: choicesFromHourlyPlans(d.plans), minute: Math.min(d.plans.length, hours) * C.stepsPerHour };
+    record = { ...record, today, purchases: d.purchases };
+    if (!d.done) break;
+    const live = replayToday(record)!;
+    if (!isClosed(live)) break;
+    record = nextDay(record, live.state);
+  }
+  return record;
 }
 
 export { deliveryUnitCost, datedBatches };

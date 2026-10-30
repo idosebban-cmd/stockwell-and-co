@@ -1,33 +1,36 @@
 /**
- * Writes a saved week played by the sensible strategy, for screenshots and browser checks.
- * Usage: vite-node scripts/make-campaign-save.ts <out.json> <path: staff|chilled> <day 0-6> <hours into that day, or 'closed'>
+ * Writes a saved shop played by the sensible strategy, for screenshots and browser checks.
+ * Usage: vite-node scripts/make-campaign-save.ts <out.json> <path: staff|chilled> <day> <hours into that day, or 'closed'>
  */
 import { writeFileSync } from 'node:fs';
 import { sensible } from '../src/sim/bots';
-import { allOffers, CAMPAIGN_VERSION, rebuildCampaign, recommendOrder, type CampaignRecord, type UpgradeId } from '../src/sim/campaign';
+import { allOffers, afterClose, newCampaignRecord, nextDay, recommendOrder, replayToday, startCampaignDay, type CampaignRecord, type UpgradeId } from '../src/sim/campaign';
+import { CONFIG } from '../src/sim/config';
+import { runHour } from '../src/sim/engine';
+import { choicesFromHourlyPlans } from '../src/sim/live';
 const [out, path = 'staff', dayArg = '3', hoursArg = '2'] = process.argv.slice(2);
 const paths: Record<string, Record<number, UpgradeId[]>> = {
   staff: { 0: ['hire:bev'], 2: ['hire:tomasz'], 3: ['till3'] },
   chilled: { 1: ['hire:bev'], 2: ['chilled', 'hire:dougie'], 4: ['shelfChilled'] },
 };
 const stopDay = Number(dayArg);
-const rec: CampaignRecord = { version: CAMPAIGN_VERSION, seed: 1, days: [] };
+let rec: CampaignRecord = newCampaignRecord(1);
 for (let d = 0; d <= stopDay; d++) {
-  let rb = rebuildCampaign(rec);
-  rec.days.push({ setup: recommendOrder(rb.camp), plans: [], purchases: [], done: false });
-  rb = rebuildCampaign(rec);
+  const setup = recommendOrder(rec.camp);
+  let state = startCampaignDay(rec.camp, setup);
+  const plans = [];
   const limit = d === stopDay && hoursArg !== 'closed' ? Number(hoursArg) : 99;
-  while (rb.phase === 'trading' && rec.days[d].plans.length < limit) {
-    rec.days[d].plans.push(sensible(rb.state!));
-    rb = rebuildCampaign(rec);
+  while (state.hour < state.ctx.hours && plans.length < limit) {
+    const p = sensible(state);
+    plans.push(p);
+    state = runHour(state, p).state;
   }
+  rec = { ...rec, today: { setup, choices: choicesFromHourlyPlans(plans), minute: plans.length * CONFIG.stepsPerHour }, purchases: [] };
   if (d < stopDay) {
-    for (const id of paths[path][d] ?? []) if (allOffers(rb.camp, rb.state).find((o) => o.id === id)?.available) {
-      rec.days[d].purchases.push(id);
-      rb = rebuildCampaign(rec);
-    }
-    rec.days[d].done = true;
+    const closed = replayToday(rec)!.state;
+    for (const id of paths[path][d] ?? []) if (allOffers(afterClose(rec, closed).camp, closed).find((o) => o.id === id)?.available) rec = { ...rec, purchases: [...rec.purchases, id] };
+    rec = nextDay(rec, closed);
   }
 }
-writeFileSync(out, JSON.stringify({ record: rec, draft: null, savedAt: '' }));
-console.log('phase', rebuildCampaign(rec).phase);
+writeFileSync(out, JSON.stringify({ record: rec, savedAt: '' }));
+console.log('day', rec.camp.day, 'minute', rec.today?.minute);

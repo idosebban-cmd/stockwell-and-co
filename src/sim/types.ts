@@ -50,9 +50,13 @@ export interface StaffMember {
   /** Hour from which this person is on shift. */
   availableFrom: number;
   lastAssignment: AssignmentId;
-  /** Ten-minute steps worked / rested so far in the current hour (for short intervals). */
+  /** Steps (minutes) worked / rested so far in the current hour. */
   stepsWorked: number;
   stepsRested: number;
+  /** Minutes rested in a row (a break counts once this reaches half an hour). */
+  restRun?: number;
+  /** A break was completed during the current hour. */
+  breakThisHour?: boolean;
 }
 
 export interface PendingDelivery {
@@ -166,6 +170,8 @@ export interface DayContext {
   actions: ActionRequest['kind'][];
   /** Whether prices can be changed today. */
   pricing: boolean;
+  /** Extra minutes of queue patience (the generous first days). */
+  patienceBonus?: number;
 }
 
 export interface SimState {
@@ -174,7 +180,7 @@ export interface SimState {
   scenario: Scenario;
   /** Next hour to run: 0..8. 8 = closed. */
   hour: number;
-  /** Ten-minute steps already played in the current hour (0..5). */
+  /** Steps (minutes) already played in the current hour. */
   step: number;
   cash: number;
   /** Cash before the day's order was paid for. */
@@ -195,6 +201,8 @@ export interface SimState {
   /** Short log of messages shown in the store's announcement board. */
   announcements: string[];
   idCounter: number;
+  /** Owed to the wholesaler for stock bought on account; repaid from takings. */
+  credit?: number;
 }
 
 export interface StepSnapshot {
@@ -214,6 +222,8 @@ export interface StepSnapshot {
   received: number;
   /** Customers the open tills could serve this step. */
   tillCapacity: number;
+  /** Money taken at the tills this step. */
+  takings: number;
 }
 
 export interface DeptHourReport {

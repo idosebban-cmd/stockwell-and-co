@@ -11,7 +11,7 @@ export function Opening({
   notice,
   onDismissNotice,
 }: {
-  /** "Start the week" or the day to continue. */
+  /** "Open the shop" or the day to continue. */
   week: { label: string; continuing: boolean };
   onWeek: () => void;
   onQuick: () => void;
@@ -27,8 +27,8 @@ export function Opening({
       <div className="opening-copy">
         <h1>Stockwell &amp; Co</h1>
         <p className="opening-line">
-          Run the shop for a week, Sunday to Saturday. Earn enough to improve it, and finish Saturday with a stronger business, happy customers and a team still
-          standing.
+          Take over a little corner shop and run it at your own pace, day after day. Keep the shelves full and the queues short, look after the team, and
+          grow the business as you go. Pause whenever you like.
         </p>
         {notice && (
           <p className="opening-notice" role="status">
@@ -46,7 +46,7 @@ export function Opening({
             {quickInProgress ? 'Continue Quick play' : 'Quick play: one Saturday'}
           </button>
         </div>
-        <p className="tiny muted">The week teaches as it goes. Prefer a guided start?</p>
+        <p className="tiny muted">The shop teaches as it goes. Prefer a guided start?</p>
         <div className="opening-links">
           <button type="button" className="btn-link" onClick={onLearn}>
             Learn to play (five short lessons)

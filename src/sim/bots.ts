@@ -6,7 +6,7 @@ import { CONFIG, DEPTS, type DeptId } from './config';
 import { defaultPlan, deptUnits, describeAction, expectedCustomers, hasDept, onShift, recommendedSetup, runHour, startDay } from './engine';
 import type { ActionRequest, AssignmentId, HourPlan, HourReport, SetupPlan, SimState } from './types';
 import { total } from './stock';
-import { allOffers, buy, CAMPAIGN_DAYS, finishDay, newCampaign, recommendOrder, startCampaignDay, type CampaignState, type DayResult, type UpgradeId } from './campaign';
+import { allOffers, buy, finishDay, WEEK_DAYS, newCampaign, recommendOrder, startCampaignDay, type CampaignState, type DayResult, type UpgradeId } from './campaign';
 
 export type Strategy = (state: SimState) => HourPlan;
 
@@ -186,17 +186,17 @@ export interface WeekResult {
   days: { result: DayResult; bought: UpgradeId[] }[];
 }
 
-/** Plays the whole week: the recommended order each morning, `strategy` each hour, `invest` after each close. */
-export function playCampaign(seed: number, strategy: Strategy, invest: InvestPolicy, order: (c: CampaignState) => SetupPlan = recommendOrder): WeekResult {
+/** Plays `count` days (a week by default): the recommended order each morning, `strategy` each hour, `invest` after each close. */
+export function playCampaign(seed: number, strategy: Strategy, invest: InvestPolicy, order: (c: CampaignState) => SetupPlan = recommendOrder, count = WEEK_DAYS): WeekResult {
   let camp = newCampaign(seed);
   const days: WeekResult['days'] = [];
-  while (camp.day < CAMPAIGN_DAYS && !camp.failed) {
+  while (camp.day < count) {
     let state = startCampaignDay(camp, order(camp));
     while (state.hour < state.ctx.hours) state = runHour(state, strategy(state)).state;
     const done = finishDay(camp, state);
     camp = done.camp;
     const bought: UpgradeId[] = [];
-    if (camp.day < CAMPAIGN_DAYS) {
+    {
       for (const id of invest(camp, state)) {
         const o = allOffers(camp, state).find((x) => x.id === id);
         if (o?.available) {

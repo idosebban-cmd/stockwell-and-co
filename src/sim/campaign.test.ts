@@ -5,18 +5,21 @@ import {
   allOffers,
   buy,
   businessValue,
-  CAMPAIGN_DAYS,
-  campaignGoal,
   carriedQty,
+  creditRoom,
   dayContext,
   finishDay,
   morningEnergy,
   newCampaign,
   newCampaignRecord,
   orderFunds,
-  rebuildCampaign,
+  nextDay,
+  phaseOf,
   recommendOrder,
+  replayToday,
   restartDay,
+  teamWellbeing,
+  WEEK_DAYS,
   startCampaignDay,
   topOffers,
   type CampaignRecord,
@@ -103,7 +106,7 @@ describe('day transitions', () => {
     // Several overworked days in a row wear the team down.
     let c = c1;
     for (let i = 0; i < 3; i++) ({ state, camp: c } = playDay(c, overwork));
-    expect(campaignGoal(c).wellbeing).toBeLessThan(campaignGoal(c1).wellbeing);
+    expect(teamWellbeing(c.staff)).toBeLessThan(teamWellbeing(c1.staff));
     expect(morningEnergy(Math.max(...c.staff.map((s) => s.fatigue)))).toBeLessThan(100);
   });
   it('moves reputation part-way towards the day’s satisfaction', () => {
@@ -146,7 +149,9 @@ describe('locks and installed equipment', () => {
     const state = startCampaignDay(c, recommendOrder(c));
     const plan = defaultPlan(state);
     expect(planErrors(state, { ...plan, pricing: { ...plan.pricing, produce: 'high' } }).join(' ')).toMatch(/Prices/);
-    expect(K.days[2].pricing).toBe(true);
+    expect(K.unlocks.pricing).toBe(2);
+    const tue = startCampaignDay({ ...c, day: 2 }, recommendOrder({ ...c, day: 2 }));
+    expect(planErrors(tue, { ...defaultPlan(tue), pricing: { ...plan.pricing, produce: 'high' } })).toEqual([]);
   });
   it('purchases persist and show in the shop the next day', () => {
     let c = newCampaign(1);
@@ -199,7 +204,7 @@ describe('purchases', () => {
 describe('recommended orders', () => {
   it('stay within the funds and the space, and adapt to stock already in the shop', () => {
     let c = newCampaign(1);
-    for (let i = 0; i < CAMPAIGN_DAYS; i++) {
+    for (let i = 0; i < WEEK_DAYS; i++) {
       const o = recommendOrder(c);
       const ctx = dayContext(c);
       const have = carriedQty(c);
@@ -220,69 +225,72 @@ describe('recommended orders', () => {
 });
 
 describe('saving, reloading and restarting', () => {
-  it('rebuilds the same campaign from its record between days and mid-shift', () => {
-    const rec: CampaignRecord = newCampaignRecord(3);
-    let rb = rebuildCampaign(rec);
-    expect(rb.phase).toBe('morning');
-    // Play Sunday through, buy, continue; then two hours of Monday.
-    const setup = recommendOrder(rb.camp);
-    rec.days.push({ setup, plans: [], purchases: [], done: false });
-    rb = rebuildCampaign(rec);
-    while (rb.phase === 'trading') {
-      rec.days[0].plans.push(sensible(rb.state!));
-      rb = rebuildCampaign(JSON.parse(JSON.stringify(rec)));
-    }
-    expect(rb.phase).toBe('closed');
-    rec.days[0].purchases.push('hire:bev');
-    rec.days[0].done = true;
-    rb = rebuildCampaign(JSON.parse(JSON.stringify(rec)));
-    expect(rb.phase).toBe('morning');
-    expect(rb.camp.day).toBe(1);
-    expect(rb.camp.staff.map((s) => s.id)).toContain('bev');
-    rec.days.push({ setup: recommendOrder(rb.camp), plans: [], purchases: [], done: false });
-    rb = rebuildCampaign(rec);
-    rec.days[1].plans.push(sensible(rb.state!));
-    rb = rebuildCampaign(rec);
-    rec.days[1].plans.push(sensible(rb.state!));
-    const mid = rebuildCampaign(JSON.parse(JSON.stringify(rec)));
-    expect(mid.phase).toBe('trading');
-    expect(mid.state!.hour).toBe(2);
-    expect(mid.state!.cash).toBeCloseTo(rebuildCampaign(rec).state!.cash, 9);
-    // Restart the day: back to Monday morning, with Sunday's purchase kept.
-    const again = rebuildCampaign(restartDay(rec));
-    expect(again.phase).toBe('morning');
-    expect(again.camp.cash).toBeCloseTo(mid.dayStart.cash, 9);
+  it('rebuilds today from the morning snapshot and the minute-stamped choices', async () => {
+    const { advance, choose, startLive } = await import('./live');
+    let rec: CampaignRecord = newCampaignRecord(3);
+    expect(phaseOf(rec, replayToday(rec))).toBe('morning');
+    // Sunday: open, move Kwame to the tills at 09:20, play to closing.
+    rec = { ...rec, today: { setup: recommendOrder(rec.camp), choices: [], minute: 0 } };
+    let live = startLive(startCampaignDay(rec.camp, rec.today!.setup));
+    live = advance(live, 20).live;
+    const c = { at: 20, kind: 'jobs' as const, assignments: { ...live.plan.assignments, kwame: 'tills' as const } };
+    live = choose(live, c);
+    live = advance(live, 400).live;
+    rec.today!.choices.push(c);
+    rec.today!.minute = 420;
+    const back = replayToday(JSON.parse(JSON.stringify(rec)))!;
+    expect(phaseOf(rec, back)).toBe('closed');
+    expect(back.state.cash).toBeCloseTo(live.state.cash, 9);
+    // Buy, move on, play into Monday; restarting returns to Monday morning with the purchase kept.
+    rec = nextDay({ ...rec, purchases: ['hire:bev'] }, back.state);
+    expect(rec.camp.day).toBe(1);
+    expect(rec.camp.staff.map((s) => s.id)).toContain('bev');
+    rec = { ...rec, today: { setup: recommendOrder(rec.camp), choices: [], minute: 90 } };
+    const mid = replayToday(rec)!;
+    expect(phaseOf(rec, mid)).toBe('trading');
+    expect(mid.state.hour).toBe(1);
+    expect(mid.state.step).toBe(30);
+    const again = restartDay(rec);
+    expect(phaseOf(again, replayToday(again))).toBe('morning');
     expect(again.camp.staff.map((s) => s.id)).toContain('bev');
   });
 });
 
-describe('the week', () => {
+describe('day after day', () => {
   const staffPath = planInvest({ 0: ['hire:bev'], 2: ['hire:tomasz'], 3: ['till3'] });
   const chilledPath = planInvest({ 2: ['chilled'], 3: ['hire:dougie'], 4: ['fridge'] });
   const shelvesPath = planInvest({ 0: ['shelfProduce'], 1: ['shelfAmbient'], 2: ['hire:bev'] });
   for (const [name, path] of Object.entries({ staffPath, chilledPath, shelvesPath })) {
-    it(`${name}: a sensible player completes the campaign objective`, () => {
+    it(`${name}: a sensible player grows the business in the first week and keeps the team well`, () => {
       for (const seed of [1, 3]) {
         const w = playCampaign(seed, sensible, path);
-        const g = campaignGoal(w.camp);
-        expect(w.camp.day).toBe(CAMPAIGN_DAYS);
-        expect(w.camp.failed).toBeNull();
-        expect(g.met).toEqual({ value: true, reputation: true, wellbeing: true });
+        expect(w.camp.day).toBe(WEEK_DAYS);
+        expect(businessValue(w.camp).total).toBeGreaterThan(w.camp.startValue + 1000);
+        expect(w.camp.reputation).toBeGreaterThan(65);
+        expect(teamWellbeing(w.camp.staff)).toBeGreaterThan(60);
       }
     });
   }
-  it('does not need the chilled department to win', () => {
-    const w = playCampaign(2, sensible, staffPath);
-    expect(w.camp.owned).not.toContain('chilled');
-    expect(Object.values(campaignGoal(w.camp).met).every(Boolean)).toBe(true);
+  it('keeps going after Saturday: the next week has everything unlocked and a little more custom', () => {
+    const w = playCampaign(1, sensible, staffPath, recommendOrder, WEEK_DAYS + 2);
+    expect(w.camp.day).toBe(WEEK_DAYS + 2);
+    const nextSunday = dayContext({ ...w.camp, day: WEEK_DAYS });
+    expect(nextSunday.weekday).toBe(0);
+    expect(nextSunday.pricing).toBe(true);
+    expect(nextSunday.actions).toContain('emergency');
+    expect(w.days[WEEK_DAYS].result.customers).toBeGreaterThan(w.days[0].result.customers);
+  });
+  it('the first days are generous: shoppers wait longer before giving up', () => {
+    const c = newCampaign(1);
+    expect(dayContext(c).patienceBonus).toBe(K.generous.patienceBonusMinutes);
+    expect(dayContext({ ...c, day: K.generous.days }).patienceBonus).toBe(0);
   });
   it('a poor first two days can be recovered from', () => {
     const weak: Strategy = (s) => (s.ctx.weekday <= 1 ? noReplenishment(s) : sensible(s));
     const w = playCampaign(1, weak, planInvest({ 2: ['hire:bev'], 3: ['shelfProduce'] }));
     const strong = playCampaign(1, sensible, planInvest({ 2: ['hire:bev'], 3: ['shelfProduce'] }));
     expect(w.days[1].result.profit).toBeLessThan(strong.days[1].result.profit);
-    expect(w.camp.failed).toBeNull();
-    expect(campaignGoal(w.camp).met.value).toBe(true);
+    expect(businessValue(w.camp).total).toBeGreaterThan(w.camp.startValue);
   });
   it('investing makes later days better (shorter queues or better availability), not cancelled out', () => {
     const base = playCampaign(1, sensible, () => []);
@@ -293,11 +301,33 @@ describe('the week', () => {
   });
 });
 
+describe('supplier credit', () => {
+  it('with no cash and the overdraft used, a small order still comes on account and is repaid from takings', () => {
+    const broke: CampaignState = { ...newCampaign(1), cash: -K.overdraftLimit - 200 };
+    expect(orderFunds(broke)).toBe(K.supplierCredit.limit);
+    const order = recommendOrder(broke);
+    const cost = checkSetup(order, undefined, { cash: Infinity, carried: carriedQty(broke), ctx: dayContext(broke) }).cost;
+    expect(cost).toBeGreaterThan(0);
+    expect(cost).toBeLessThanOrEqual(K.supplierCredit.limit);
+    let state = startCampaignDay(broke, order);
+    expect(state.credit).toBeCloseTo(cost, 6);
+    expect(state.cash).toBeCloseTo(broke.cash, 6);
+    while (state.hour < state.ctx.hours) state = runHour(state, sensible(state)).state;
+    expect(state.credit!).toBeLessThan(cost);
+    expect(state.credit!).toBeCloseTo(Math.max(0, cost - state.ledger.revenue * K.supplierCredit.repayShare), 6);
+    const after = finishDay(broke, state).camp;
+    expect(after.credit).toBeCloseTo(state.credit!, 9);
+    expect(creditRoom(after)).toBeCloseTo(K.supplierCredit.limit - after.credit, 9);
+    // What is owed counts against business value.
+    expect(businessValue(after).debt).toBeCloseTo(Math.max(0, -after.cash) + after.credit, 9);
+  });
+});
+
 describe('default plans', () => {
   it('are valid every hour of every day, with hires and only the tills that are installed', () => {
     let c = newCampaign(1);
     const hires: Record<number, string[]> = { 0: ['hire:bev', 'hire:tomasz'], 2: ['chilled', 'hire:dougie'] };
-    while (c.day < CAMPAIGN_DAYS) {
+    while (c.day < WEEK_DAYS) {
       let state = startCampaignDay(c, recommendOrder(c));
       while (state.hour < state.ctx.hours) {
         const p = defaultPlan(state);
@@ -315,20 +345,17 @@ describe('saves', () => {
     const m = new Map<string, string>();
     return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
   };
-  it('a saved week loads back exactly, between days and mid-shift', async () => {
+  it('a saved day loads back exactly, mid-shift', async () => {
     const { saveCampaign, loadCampaign } = await import('./save');
     const st = memory();
-    const rec = newCampaignRecord(2);
-    let rb = rebuildCampaign(rec);
-    rec.days.push({ setup: recommendOrder(rb.camp), plans: [], purchases: [], done: false });
-    rb = rebuildCampaign(rec);
-    rec.days[0].plans.push(sensible(rb.state!));
-    saveCampaign(st, { record: rec, draft: null });
+    let rec = newCampaignRecord(2);
+    rec = { ...rec, today: { setup: recommendOrder(rec.camp), choices: [{ at: 0, kind: 'jobs', assignments: { priya: 'tills', kwame: 'replenish:produce', mags: 'break' } }], minute: 75 } };
+    saveCampaign(st, { record: rec });
     const back = loadCampaign(st);
     expect(back.problem).toBeNull();
-    expect(rebuildCampaign(back.file!.record).state!.cash).toBeCloseTo(rebuildCampaign(rec).state!.cash, 9);
+    expect(replayToday(back.file!.record)!.state.cash).toBeCloseTo(replayToday(rec)!.state.cash, 9);
   });
-  it('an incompatible saved week is reset with an explanation, not silently', async () => {
+  it('an incompatible save is reset with an explanation, not silently', async () => {
     const { loadCampaign, CAMPAIGN_KEY } = await import('./save');
     const st = memory();
     st.setItem(CAMPAIGN_KEY, JSON.stringify({ record: { version: 0, seed: 1, days: [] } }));
@@ -336,13 +363,51 @@ describe('saves', () => {
     expect(r.file).toBeNull();
     expect(r.problem).toMatch(/earlier version/);
   });
-  it('Quick play saves from before the week existed still load', async () => {
-    const { loadGame, SAVE_KEY } = await import('./save');
-    const { RECORD_VERSION } = await import('./game');
-    const { recommendedSetup } = await import('./engine');
-    expect(RECORD_VERSION).toBe(3);
+  it('a week saved hour by hour (version 1) is carried over: finished days kept, today continued', async () => {
+    const { loadCampaign, CAMPAIGN_KEY } = await import('./save');
     const st = memory();
-    st.setItem(SAVE_KEY, JSON.stringify({ record: { version: 3, seed: 1, setup: recommendedSetup(), plans: [] }, draft: null, savedAt: '' }));
-    expect(loadGame(st)?.record.seed).toBe(1);
+    // Sunday finished with Bev hired; Monday two hours in.
+    let c = newCampaign(4);
+    const sunday = recommendOrder(c);
+    let state = startCampaignDay(c, sunday);
+    const plans = [];
+    while (state.hour < state.ctx.hours) {
+      const p = sensible(state);
+      plans.push(p);
+      state = runHour(state, p).state;
+    }
+    c = finishDay(c, state).camp;
+    const monday = recommendOrder(buy(c, 'hire:bev'));
+    let m = startCampaignDay(buy(c, 'hire:bev'), monday);
+    const mplans = [];
+    for (let h = 0; h < 2; h++) {
+      const p = sensible(m);
+      mplans.push(p);
+      m = runHour(m, p).state;
+    }
+    const v1 = { version: 1, seed: 4, days: [{ setup: sunday, plans, purchases: ['hire:bev'], done: true }, { setup: monday, plans: mplans, purchases: [], done: false }] };
+    st.setItem(CAMPAIGN_KEY, JSON.stringify({ record: v1, draft: null }));
+    const r = loadCampaign(st);
+    expect(r.problem).toMatch(/carried over/);
+    const rec = r.file!.record;
+    expect(rec.camp.day).toBe(1);
+    expect(rec.camp.staff.map((s) => s.id)).toContain('bev');
+    const today = replayToday(rec)!;
+    expect(today.state.hour).toBe(2);
+    // Same decisions, played minute by minute with automatic break returns: close to the hourly result.
+    expect(Math.abs(today.state.cash - m.cash)).toBeLessThan(60);
+  });
+  it('Quick play saves from the hourly version are converted', async () => {
+    const { loadGame, SAVE_KEY } = await import('./save');
+    const { RECORD_VERSION, rebuild } = await import('./game');
+    const { recommendedSetup, startDay } = await import('./engine');
+    expect(RECORD_VERSION).toBe(4);
+    const st = memory();
+    const s0 = startDay(1, recommendedSetup());
+    st.setItem(SAVE_KEY, JSON.stringify({ record: { version: 3, seed: 1, setup: recommendedSetup(), plans: [sensible(s0)] }, draft: null, savedAt: '' }));
+    const g = loadGame(st)!;
+    expect(g.record.seed).toBe(1);
+    expect(g.record.minute).toBe(CONFIG.stepsPerHour);
+    expect(rebuild(g.record)!.state.hour).toBe(1);
   });
 });

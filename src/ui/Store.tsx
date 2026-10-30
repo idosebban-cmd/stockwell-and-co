@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { CONFIG, DEPTS, type DeptId } from '../sim/config';
 import type { DayContext } from '../sim/types';
 import { assignmentLimit, productivity } from '../sim/engine';
@@ -120,6 +120,28 @@ interface Props {
   /** The place whose panel is open: its counts are shown in the shop. */
   detail?: ZoneId | null;
   fit: ShopFit;
+  /** Live play: people can be dragged to a place, and walk there when moved. */
+  onDrop?: (staffId: string, job: AssignmentId) => void;
+  /** Coins popping up over the tills as they take money. */
+  pops?: CoinPop[];
+}
+
+export interface CoinPop {
+  id: number;
+  /** Checkout lane (0 = top). */
+  lane: number;
+  text: string;
+}
+
+interface Drag {
+  id: string;
+  x: number;
+  y: number;
+  sx: number;
+  sy: number;
+  moved: boolean;
+  /** Already selected when the drag began (a click without moving then deselects). */
+  wasSelected: boolean;
 }
 
 const W = 1000;
@@ -214,13 +236,55 @@ function StoreImpl(props: Props) {
   const openTills = counts.get('tills') ?? 0;
   const motion = !reducedMotion && animating;
   const selectedName = staff.find((s) => s.id === selected)?.name;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const draggable = interactive && !!props.onDrop;
+
+  const toSvg = (e: ReactPointerEvent): [number, number] => {
+    const svg = svgRef.current;
+    const m = svg?.getScreenCTM();
+    if (!svg || !m) return [0, 0];
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    return [p.x, p.y];
+  };
+  const zoneAt = (x: number, y: number) => zones.find((z) => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h);
+  const dropZone = drag?.moved ? zoneAt(drag.x, drag.y) : undefined;
+  const startDrag = (id: string, e: ReactPointerEvent) => {
+    if (!draggable || e.button !== 0) return;
+    e.stopPropagation();
+    const [x, y] = toSvg(e);
+    try {
+      svgRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    setDrag({ id, x, y, sx: x, sy: y, moved: false, wasSelected: selected === id });
+    if (selected !== id) onSelectStaff(id);
+  };
+  const moveDrag = (e: ReactPointerEvent) => {
+    if (!drag) return;
+    const [x, y] = toSvg(e);
+    setDrag({ ...drag, x, y, moved: drag.moved || Math.hypot(x - drag.sx, y - drag.sy) > 10 });
+  };
+  const endDrag = () => {
+    if (!drag) return;
+    if (drag.moved) {
+      const z = zoneAt(drag.x, drag.y);
+      if (z) props.onDrop?.(drag.id, ZONE_JOB[z.z]);
+    } else if (drag.wasSelected) onSelectStaff(drag.id);
+    setDrag(null);
+  };
 
   return (
     <svg
-      className={`store ${motion ? 'is-animating' : ''}`}
+      ref={svgRef}
+      className={`store ${motion ? 'is-animating' : ''} ${drag?.moved ? 'is-dragging' : ''}`}
       viewBox={`0 0 ${W} ${H}`}
       role="group"
-      aria-label="Plan of the shop. Select a department to see its controls, or select a staff member and then a zone to move them."
+      aria-label={`Plan of the shop. Select a department to see its controls, or ${draggable ? 'drag a staff member to a place, or ' : ''}select a staff member and then a zone to move them.`}
+      onPointerMove={drag ? moveDrag : undefined}
+      onPointerUp={drag ? endDrag : undefined}
+      onPointerCancel={drag ? () => setDrag(null) : undefined}
     >
       <defs>
         <pattern id="tiles" width="26" height="26" patternUnits="userSpaceOnUse">
@@ -276,7 +340,7 @@ function StoreImpl(props: Props) {
         return (
           <g key={zone.z}>
             <rect
-              className={`zone ${selected && interactive ? (hint?.blocked || full ? 'zone-armed zone-full' : 'zone-armed') : interactive ? 'zone-browse' : ''} ${context === zone.z ? 'zone-context' : ''} ${highlightZones.includes(zone.z) ? 'zone-lesson' : ''}`}
+              className={`zone ${selected && interactive ? (hint?.blocked || (full && !props.onDrop) ? 'zone-armed zone-full' : 'zone-armed') : interactive ? 'zone-browse' : ''} ${context === zone.z ? 'zone-context' : ''} ${highlightZones.includes(zone.z) ? 'zone-lesson' : ''} ${dropZone?.z === zone.z ? 'zone-drop' : ''}`}
               x={zone.x}
               y={zone.y}
               width={zone.w}
@@ -288,7 +352,7 @@ function StoreImpl(props: Props) {
               aria-pressed={!selected ? context === zone.z : undefined}
               onClick={activate}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (e.key === 'Enter') {
                   e.preventDefault();
                   activate();
                 }
@@ -324,21 +388,29 @@ function StoreImpl(props: Props) {
           return <HintPill key={zone.z} zone={zone} hint={hint} />;
         })}
 
-      {placed.map(({ s, a, x, y }) => (
-        <StaffToken
-          lesson={highlightStaff.includes(s.id)}
-          key={s.id}
-          s={s}
-          a={a}
-          x={x}
-          y={y}
-          act={activity[s.id] ?? 'plan'}
-          selected={selected === s.id}
-          interactive={interactive}
-          onClick={() => onSelectStaff(s.id)}
-          named={selected === s.id || highlightStaff.includes(s.id)}
-        />
-      ))}
+      {props.pops && !reducedMotion && <CoinPops pops={props.pops} />}
+
+      {placed.map(({ s, a, x, y }) => {
+        const dragging = drag?.moved && drag.id === s.id;
+        return (
+          <StaffToken
+            lesson={highlightStaff.includes(s.id)}
+            key={s.id}
+            s={s}
+            a={a}
+            x={dragging ? drag.x : x}
+            y={dragging ? drag.y + 30 : y}
+            act={activity[s.id] ?? 'plan'}
+            selected={selected === s.id}
+            interactive={interactive}
+            onClick={() => onSelectStaff(s.id)}
+            onPointerDown={draggable ? (e) => startDrag(s.id, e) : undefined}
+            walk={draggable && !dragging}
+            dragging={!!dragging}
+            named={selected === s.id || highlightStaff.includes(s.id)}
+          />
+        );
+      })}
     </svg>
   );
 }
@@ -847,7 +919,7 @@ function ProblemMark({ x, y, level, label, onOpen }: { x: number; y: number; lev
       onKeyDown={
         onOpen
           ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
+              if (e.key === 'Enter') {
                 e.preventDefault();
                 onOpen();
               }
@@ -886,7 +958,7 @@ function Notices({ notices, onOpen }: { notices: ShopNotice[]; onOpen?: (z: Zone
             onKeyDown={
               onOpen
                 ? (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.key === 'Enter') {
                       e.preventDefault();
                       onOpen(n.zone);
                     }
@@ -925,6 +997,26 @@ function ZoneBadge({ x, y, n, lim }: { x: number; y: number; n: number; lim: num
   );
 }
 
+function CoinPops({ pops }: { pops: CoinPop[] }) {
+  return (
+    <g aria-hidden="true">
+      {pops.map((p) => (
+        <g key={p.id} transform={`translate(812 ${LANE_Y[Math.min(p.lane, LANE_Y.length - 1)] - 6})`}>
+          <g className="coin-pop">
+            <circle r="9" fill="#e3b23c" stroke="#9a6f12" strokeWidth="2" />
+            <text y="3.5" textAnchor="middle" fontSize="10" fontWeight="900" fill="#7a540a">
+              £
+            </text>
+            <text x="14" y="4" fontSize="13" fontWeight="800" fill="var(--burgundy-dark)" stroke="var(--paper)" strokeWidth="3" paintOrder="stroke">
+              {p.text}
+            </text>
+          </g>
+        </g>
+      ))}
+    </g>
+  );
+}
+
 function StaffToken({
   s,
   a,
@@ -934,9 +1026,15 @@ function StaffToken({
   selected,
   interactive,
   onClick,
+  onPointerDown,
+  walk,
+  dragging,
   lesson,
   named,
 }: {
+  onPointerDown?: (e: ReactPointerEvent) => void;
+  walk?: boolean;
+  dragging?: boolean;
   lesson?: boolean;
   named?: boolean;
   s: StaffMember;
@@ -955,14 +1053,15 @@ function StaffToken({
   const barColour = e < CONFIG.staff.exhaustedBelow ? 'var(--bad)' : e < CONFIG.staff.tiredBelow ? 'var(--mustard)' : 'var(--good)';
   return (
     <g
-      className={`token ${selected ? 'token-selected' : ''} ${interactive ? 'token-interactive' : ''}`}
-      transform={`translate(${x} ${y})`}
+      className={`token ${selected ? 'token-selected' : ''} ${interactive ? 'token-interactive' : ''} ${walk ? 'token-walk' : ''} ${dragging ? 'token-dragging' : ''}`}
+      style={{ transform: `translate(${x}px, ${y}px)` }}
+      onPointerDown={onPointerDown}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
       aria-pressed={interactive ? selected : undefined}
       aria-label={interactive ? `${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ', tired' : ''}. Select.` : undefined}
       onClick={
-        interactive
+        interactive && !onPointerDown
           ? (ev) => {
               ev.stopPropagation();
               onClick();

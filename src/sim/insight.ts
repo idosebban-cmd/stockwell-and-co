@@ -7,7 +7,7 @@
  * (no hidden variation, no unannounced events), so it is an estimate, never
  * a promise. Outcomes read recorded results only.
  */
-import { CONFIG, DEPTS, PRICE_TIERS, deptName, hourLabel, type DeptId, type PriceTier } from './config';
+import { CONFIG, DEPTS, PRICE_TIERS, deptName, type DeptId, type PriceTier } from './config';
 import {
   actionKey,
   assignmentLimit,
@@ -22,6 +22,8 @@ import {
   productivity,
   promotionActive,
   runSteps,
+  STEP_MINUTES,
+  clockLabel,
   shelfCapacity,
   shortDatedUnits,
 } from './engine';
@@ -306,8 +308,8 @@ export function fridgeFacts(state: SimState, plan: HourPlan) {
   const movers = onShift(state).filter((s) => plan.assignments[s.id] === 'replenish:chilled');
   const moveRate = movers.reduce((t, s) => t + C.departments.chilled.replenishRate * jobRate(s, 'replenish:chilled'), 0);
   const booked = state.fridge.repairAtStep !== null || plan.actions.some((a) => a.kind === 'repair');
-  const arrivalStep = state.fridge.repairAtStep ?? state.hour * STEPS + (state.step ?? 0) + C.actions.repair.arrivalSteps;
-  const at = `${hourLabel(Math.floor(arrivalStep / STEPS)).slice(0, 2)}:${String((arrivalStep % STEPS) * 10).padStart(2, '0')}`;
+  const arrivalStep = state.fridge.repairAtStep ?? state.hour * STEPS + (state.step ?? 0) + Math.round(C.actions.repair.arrivalMinutes / STEP_MINUTES);
+  const at = clockLabel(Math.floor(arrivalStep / STEPS), arrivalStep % STEPS);
   return {
     atRisk,
     atRiskValue: atRisk * C.departments.chilled.unitCost,
@@ -339,7 +341,7 @@ export interface Outcome {
 
 export function intervalOutcomes(report: HourReport): Outcome[] {
   const out: Outcome[] = [];
-  const mins = (report.toStep - report.fromStep) * 10;
+  const mins = (report.toStep - report.fromStep) * STEP_MINUTES;
   const received = DEPTS.reduce((t, d) => t + report.dept[d].received, 0);
   if (received >= 1)
     out.push({ zone: 'dock', tone: 'good', tag: `Unloaded ${Math.round(received)}`, text: `${Math.round(received)} items moved from the dock into the stockroom.`, weight: received / 10 });

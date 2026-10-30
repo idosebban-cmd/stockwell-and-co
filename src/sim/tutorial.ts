@@ -36,7 +36,7 @@ export interface Lesson {
   title: string;
   /** One short objective. */
   objective: string;
-  /** Ten-minute steps the interval runs for. */
+  /** Minutes (simulation steps) the interval runs for. */
   steps: number;
   optional?: boolean;
   build(): SimState;
@@ -116,7 +116,7 @@ export const LESSONS: Lesson[] = [
     id: 'serve',
     title: 'Serve customers',
     objective: 'The queue is growing. Put Bev on Serve customers.',
-    steps: 3,
+    steps: 30,
     build: () =>
       build({ hour: 3, staff: { priya: 'tills', bev: 'replenish:ambient', kwame: 'replenish:produce' }, queue: 6 }),
     focus: (_s, plan) => (job(plan, 'bev') === 'tills' ? { staff: [], zones: [] } : { staff: ['bev'], zones: ['tills'] }),
@@ -145,7 +145,7 @@ export const LESSONS: Lesson[] = [
     id: 'fill',
     title: 'Fill shelves',
     objective: 'Fruit & veg is almost empty, but the stockroom is full. Put Kwame on Fill produce shelves.',
-    steps: 3,
+    steps: 30,
     build: () =>
       build({ hour: 3, staff: { priya: 'tills', bev: 'tills', kwame: 'replenish:ambient' }, stock: { produce: { shelf: 25, backroom: 300 } } }),
     focus: (_s, plan) => (count(plan, 'replenish:produce') > 0 ? { staff: [], zones: [] } : { staff: ['kwame'], zones: ['produce'] }),
@@ -172,7 +172,7 @@ export const LESSONS: Lesson[] = [
     id: 'unload',
     title: 'Unload deliveries',
     objective: 'A delivery is stuck on the dock. Put Tomasz on Unload delivery and keep Kwame filling produce.',
-    steps: 3,
+    steps: 30,
     build: () =>
       build({
         hour: 3,
@@ -222,7 +222,7 @@ export const LESSONS: Lesson[] = [
     id: 'rest',
     title: 'Rest staff',
     objective: 'Dougie is exhausted and working slowly. Send Dougie on a break and move Mags to Fill chilled shelves.',
-    steps: 3,
+    steps: 30,
     build: () =>
       build({
         hour: 4,
@@ -271,7 +271,7 @@ export const LESSONS: Lesson[] = [
     id: 'tradeoff',
     title: 'Choose a trade-off',
     objective: 'The queue is building and grocery shelves are running low. Where should Tomasz work?',
-    steps: 3,
+    steps: 30,
     build: () =>
       build({
         hour: 3,
@@ -303,7 +303,7 @@ export const LESSONS: Lesson[] = [
     id: 'price-surplus',
     title: 'Pricing: too much stock',
     objective: 'Last hour: more short-dated chilled than shoppers will want. Unsold items are binned at 17:00. Compare prices and choose one.',
-    steps: 6,
+    steps: 60,
     optional: true,
     build: () =>
       build({
@@ -319,7 +319,7 @@ export const LESSONS: Lesson[] = [
     id: 'price-scarce',
     title: 'Pricing: not enough stock',
     objective: 'Fruit & veg won’t last the hour and nothing more is coming. Compare prices and choose one.',
-    steps: 6,
+    steps: 60,
     optional: true,
     build: () =>
       build({

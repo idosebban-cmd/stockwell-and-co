@@ -27,12 +27,14 @@ interface Props {
   extra?: ReactNode;
   /** Campaign: business value lines for the Accounts tab. */
   accountsExtra?: ReactNode;
+  /** Figures only, with no targets, ticks or crosses (your shop has no pass or fail). */
+  plain?: boolean;
 }
 
 type Tab = 'accounts' | 'operations' | 'team';
 
 /** Closing time: a compact result first, the full report on request. */
-export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra }: Props) {
+export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra, plain }: Props) {
   const s = summarise(state, targets);
   const [report, setReport] = useState(false);
   const [tab, setTab] = useState<Tab>('accounts');
@@ -44,17 +46,17 @@ export function Closing({ state, targets, title, kicker, cash, primary, others =
             <p className="panel-kicker">{kicker}</p>
             <h1 id="result-h">{title}</h1>
           </div>
-          <ul className="indicators" aria-label={`${s.metCount} of ${s.scores.length} targets met`}>
+          <ul className="indicators" aria-label={plain ? 'Today’s figures' : `${s.metCount} of ${s.scores.length} targets met`}>
             {s.scores.map((x) => (
-              <li key={x.key} className={x.met ? 'met' : 'missed'}>
+              <li key={x.key} className={plain ? 'plain' : x.met ? 'met' : 'missed'}>
                 <ResultIcon kind={x.key} />
                 <span className="ind-text">
                   <span className="ind-label">{x.key === 'customers' ? 'Customer satisfaction' : x.key === 'staff' ? 'Staff wellbeing' : 'Profit'}</span>
                   <span className="ind-value">{x.display}</span>
-                  <span className="ind-target">
+                  {!plain && <span className="ind-target">
                     <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> target {x.targetDisplay}
                     <span className="sr-only">{x.met ? ', met' : ', missed'}</span>
-                  </span>
+                  </span>}
                 </span>
               </li>
             ))}

@@ -23,8 +23,31 @@ export const CONFIG = {
   /** Shop opens at 09:00 and closes at 17:00: eight hourly turns. */
   openingHour: 9,
   hours: 8,
-  /** Internal sub-steps per hour (10 minutes each). Not shown to the player. */
-  stepsPerHour: 6,
+  /** Simulation steps per hour: one per in-game minute, so a move takes effect within a minute. */
+  stepsPerHour: 60,
+
+  /**
+   * The live clock. At 1x one in-game hour takes `secondsPerHour` real
+   * seconds; 2x and 3x run the same minutes faster. Space pauses.
+   */
+  live: {
+    secondsPerHour: 60,
+    speeds: [1, 2, 3] as number[],
+    /** A break ends by itself after this many minutes and the person goes back to their job. */
+    breakMinutes: 30,
+    /** Autosave at least this often while the clock runs (real seconds). */
+    autosaveSeconds: 5,
+  },
+
+  /** Sound and the little coin pops when a till takes money. */
+  juice: {
+    /** Volume of the till ding, 0–1 (gentle). */
+    volume: 0.18,
+    /** At most one ding per till this often (real milliseconds). */
+    dingEveryMs: 1400,
+    /** Takings that make a till ding (pounds since its last ding). */
+    dingAfterPounds: 6,
+  },
 
   startingCash: 3600,
 
@@ -186,9 +209,10 @@ export const CONFIG = {
     baseServiceMinutes: 1,
     /** Customers start leaving once the expected wait exceeds this. */
     patienceMinutes: 6,
-    /** Extra share leaving per 10 minutes for each minute over patience. */
-    abandonPerMinute: 1 / 25,
-    maxAbandonPerStep: 0.5,
+    /** Share of the queue leaving per 10 minutes, for each minute the wait is over patience. */
+    abandonPer10Minutes: 1 / 25,
+    /** At most this share leaves in any 10 minutes. */
+    maxAbandonPer10Minutes: 0.5,
   },
 
   staff: {
@@ -268,8 +292,8 @@ export const CONFIG = {
     },
     repair: {
       cost: 140,
-      /** Engineer arrives after this many 10-minute steps. */
-      arrivalSteps: 3,
+      /** Engineer arrives this many minutes after being called. */
+      arrivalMinutes: 30,
     },
   },
 
@@ -286,11 +310,28 @@ export const CONFIG = {
   },
 
   /**
-   * The seven-day campaign: Sunday to Saturday in the same shop. Provisional
-   * values, balanced with scripted players (scripts/campaign.ts); see README.
+   * The shop, day after day: Sunday to Saturday and round again, with no end
+   * and no pass or fail. Provisional values, balanced with scripted players
+   * (scripts/campaign.ts); see README.
    */
   campaign: {
-    startCash: 1200,
+    startCash: 1500,
+    /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */
+    unlocks: {
+      pricing: 2,
+      actions: { emergency: 1, markdown: 2, promotion: 2, temp: 3, repair: 3 },
+    },
+    /** The first days are gentler: shoppers wait this many extra minutes before giving up. */
+    generous: { days: 3, patienceBonusMinutes: 3 },
+    /** Word gets round: each completed week brings this many more shoppers, up to `maxGrowth`. */
+    weeklyGrowth: 0.05,
+    maxGrowth: 0.3,
+    /**
+     * The wholesaler's account. When cash and overdraft can't cover the
+     * morning order, up to `limit` of stock comes on account; `repayShare` of
+     * takings goes to paying it off until it is cleared.
+     */
+    supplierCredit: { limit: 300, repayShare: 0.3 },
     /** The three regulars at the start; the others can be hired, in any order. */
     startStaff: ['priya', 'kwame', 'mags'],
     hireable: ['bev', 'tomasz', 'dougie'],
@@ -316,22 +357,18 @@ export const CONFIG = {
     /** Overnight rest restores energy, but part of the day's strain carries over and lowers the next morning's energy. */
     fatigue: { carry: 0.4, energyPerStrain: 0.8, maxEnergyLoss: 25 },
     overnight: { produceShrink: 0.03 },
-    /** The bank lets cash go this far below zero (counted as debt); beyond it the campaign ends. */
+    /** The bank lets the morning order take cash this far below zero (counted as debt). */
     overdraftLimit: 500,
     /** Recommended orders keep this many hours of wages and costs back (the rest is paid from takings). */
     orderReserveHours: 1,
-    /** Finish Saturday with business value this much above the start, reputation and team wellbeing at least these. */
-    objective: { growth: 1500, reputation: 65, wellbeing: 60 },
     days: [
       {
         name: 'Sunday',
         hours: 4,
         forecast: [16, 24, 28, 22],
         middayHour: null,
-        pricing: false,
-        actions: [],
-        profitTarget: 20,
-        intro: 'First day in charge. Keep a till open, keep the shelves filled from the stockroom, and give everyone a break.',
+        intro: 'First day in charge. Keep a till open, keep the shelves filled from the stockroom, and give everyone a break. There’s no rush: pause whenever you like.',
+        later: 'Sunday: short hours and a calm start to the week.',
         events: [],
       },
       {
@@ -339,10 +376,8 @@ export const CONFIG = {
         hours: 5,
         forecast: [20, 28, 34, 32, 24],
         middayHour: 2,
-        pricing: false,
-        actions: ['emergency'],
-        profitTarget: 40,
         intro: 'New today: a midday delivery arrives at 11:00. Someone has to unload it on the dock before the shelves can be filled from it.',
+        later: 'Monday: a quiet one, with the midday lorry at 11:00.',
         events: [],
       },
       {
@@ -350,10 +385,8 @@ export const CONFIG = {
         hours: 6,
         forecast: [22, 30, 38, 40, 32, 26],
         middayHour: 3,
-        pricing: true,
-        actions: ['emergency', 'markdown', 'promotion'],
-        profitTarget: 110,
         intro: 'New today: you can set each department’s price. Click a department, then Change prices.',
+        later: 'Tuesday: an ordinary day. A good one for trying a new price.',
         events: [],
       },
       {
@@ -361,10 +394,8 @@ export const CONFIG = {
         hours: 6,
         forecast: [40, 48, 40, 32, 26, 24],
         middayHour: 3,
-        pricing: true,
-        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
-        profitTarget: 140,
         intro: 'Market day: busiest first thing, quieter after lunch.',
+        later: 'Market day: busiest first thing, quieter after lunch.',
         events: [{ kind: 'delayedDelivery', hour: 3, warnAt: 1 }],
       },
       {
@@ -372,10 +403,8 @@ export const CONFIG = {
         hours: 7,
         forecast: [24, 30, 36, 42, 36, 46, 54],
         middayHour: 3,
-        pricing: true,
-        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
-        profitTarget: 170,
         intro: 'Late opening: the after-work crowd arrives from 14:00.',
+        later: 'Late opening: the after-work crowd arrives from 14:00.',
         events: [{ kind: 'rush', hour: 6, warnAt: 4 }],
       },
       {
@@ -383,10 +412,8 @@ export const CONFIG = {
         hours: 7,
         forecast: [30, 40, 50, 58, 52, 48, 46],
         middayHour: 3,
-        pricing: true,
-        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
-        profitTarget: 220,
         intro: 'Payday: steady and busy all day.',
+        later: 'Payday: steady and busy all day.',
         /** Only if the shop has chilled cabinets without the refrigeration upgrade; announced at opening. */
         events: [{ kind: 'fridgeFault', hour: 2, warnAt: 0 }],
       },
@@ -395,10 +422,8 @@ export const CONFIG = {
         hours: 8,
         forecast: [35, 48, 62, 75, 72, 58, 50, 40],
         middayHour: 3,
-        pricing: true,
-        actions: ['emergency', 'markdown', 'promotion', 'temp', 'repair'],
-        profitTarget: 320,
-        intro: 'Saturday: the busiest day of the week, and the end of your first week.',
+        intro: 'Saturday: the busiest day of the week.',
+        later: 'Saturday: the busiest day of the week.',
         events: [{ kind: 'rush', hour: 5, warnAt: 3 }],
       },
     ] as CampaignDayConfig[],
@@ -429,12 +454,10 @@ export interface CampaignDayConfig {
   /** Customers per hour before reputation. */
   forecast: number[];
   middayHour: number | null;
-  pricing: boolean;
-  actions: ('markdown' | 'promotion' | 'emergency' | 'temp' | 'repair')[];
-  /** The day's objective: operating profit of at least this. */
-  profitTarget: number;
-  /** One line shown at opening; introduces whatever is new today. */
+  /** One line shown at opening in the first week; introduces whatever is new today. */
   intro: string;
+  /** The line shown on this weekday in later weeks. */
+  later: string;
   events: { kind: 'rush' | 'delayedDelivery' | 'fridgeFault'; hour: number; warnAt: number }[];
 }
 

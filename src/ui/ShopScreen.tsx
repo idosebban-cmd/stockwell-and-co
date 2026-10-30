@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CONFIG, DEPTS, hourLabel } from '../sim/config';
-import { assignmentLimit, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
+import { STEP_MINUTES, assignmentLimit, clockLabel, expectedCustomers, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
 import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
-import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type JobHint, type ShopNotice, type StoreView, type ZoneId } from './Store';
+import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
 import type { LessonFocus } from '../sim/tutorial';
 
@@ -43,7 +43,8 @@ interface Props {
   state: SimState;
   plan: HourPlan | null;
   setPlan: (p: HourPlan) => void;
-  phase: 'plan' | 'replay' | 'results';
+  /** 'live': the clock runs; changes take effect at once. */
+  phase: 'plan' | 'replay' | 'results' | 'live';
   report: HourReport | null;
   onRun: () => void;
   onReplayDone: () => void;
@@ -63,26 +64,37 @@ interface Props {
   interactive?: boolean;
   /** Labels to show beside places in the shop (the morning briefing's stock labels). */
   notices?: ShopNotice[];
+  /** Live play: move someone now (swapping with the person there if the place is full). */
+  onMove?: (staffId: string, job: AssignmentId) => void;
+  /** Live play: the clock controls, shown where the run button was. */
+  clock?: ReactNode;
+  /** Live play: coins over the tills. */
+  pops?: CoinPop[];
+  /** Live play: the clock is paused. */
+  paused?: boolean;
 }
 
 const STEP_MS = { normal: 800, fast: 380 };
 
-export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices }: Props) {
+export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices, onMove, clock, pops, paused }: Props) {
+  const live = phase === 'live';
+  /** Planning or playing live: the shop can be changed. */
+  const planning = phase === 'plan' || live;
   const [sel, setSelState] = useState<Selection>(null);
   const [toast, setToast] = useState<{ text: string; warn?: boolean } | null>(null);
   const [step, setStep] = useState(0);
   const [dismissed, setDismissed] = useState<HourReport | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const summary = report && dismissed !== report && (phase === 'results' || (phase === 'plan' && summaryOnPlan)) ? report : null;
+  const summary = report && dismissed !== report && (phase === 'results' || (planning && summaryOnPlan)) ? report : null;
   const dismissSummary = useCallback(() => setDismissed(report), [report]);
   const setSel = useCallback(
     (s: Selection) => {
       setSelState(s);
       // Opening anything replaces the summary.
-      if (s && phase === 'plan') setDismissed(report);
+      if (s && planning) setDismissed(report);
     },
-    [phase, report],
+    [planning, report],
   );
 
   const say = useCallback((text: string, warn = false) => {
@@ -93,28 +105,33 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
 
   // A lesson's price comparison opens with the lesson.
   useEffect(() => {
-    if (focus?.priceDept && phase === 'plan') setSelState({ kind: 'zone', zone: focus.priceDept });
-  }, [focus?.priceDept, phase]);
+    if (focus?.priceDept && planning) setSelState({ kind: 'zone', zone: focus.priceDept });
+  }, [focus?.priceDept, planning]);
   useEffect(() => {
-    if (phase !== 'plan') {
+    if (!planning) {
       setSelState(null);
       setToast(null);
     }
-  }, [phase]);
+  }, [planning]);
 
   // Replay timer: purely presentational; the interval is already resolved.
   useEffect(() => {
     if (phase !== 'replay' || !report) return;
-    setStep(0);
+    // One frame per ten minutes of the interval.
+    const stride = Math.max(1, Math.round(10 / STEP_MINUTES));
+    const last = report.steps.length - 1;
+    let i = Math.min(last, stride - 1);
+    setStep(i);
     const ms = reduced ? 1000 : STEP_MS[replaySpeed];
-    let i = 0;
     let done: number | undefined;
     const t = window.setInterval(() => {
-      i += 1;
-      if (i >= report.steps.length) {
+      if (i >= last) {
         window.clearInterval(t);
         done = window.setTimeout(onReplayDone, ms / 2);
-      } else setStep(i);
+      } else {
+        i = Math.min(last, i + stride);
+        setStep(i);
+      }
     }, ms);
     return () => {
       window.clearInterval(t);
@@ -122,12 +139,14 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
     };
   }, [phase, report, reduced, replaySpeed, onReplayDone]);
 
-  const when = steps >= 6 ? 'next hour' : `for the next ${steps * 10} minutes`;
+  const when = steps >= CONFIG.stepsPerHour ? 'next hour' : `for the next ${Math.round(steps * STEP_MINUTES)} minutes`;
   const onPlanChange = useCallback(
     (p: HourPlan) => {
       if (plan) {
         const changed = Object.entries(p.assignments).filter(([id, a]) => plan.assignments[id] !== a);
-        if (changed.length) {
+        if (changed.length && live) {
+          say(changed.map(([id, a]) => `${state.staff.find((s) => s.id === id)?.name} → ${ASSIGNMENT_LABEL[a]}`).join(' · '));
+        } else if (changed.length) {
           const names = changed.map(([id, a]) => `${state.staff.find((s) => s.id === id)?.name} will ${ASSIGNMENT_FUTURE[a]}`);
           const effect = statusChanges(outlook(state, plan, steps), outlook(state, p, steps));
           say(`${names.join('; ')} ${when}.${effect ? ` ${effect}` : ''}`);
@@ -135,15 +154,36 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
       }
       setPlan(p);
     },
-    [plan, setPlan, state, say, when, steps],
+    [plan, setPlan, state, say, when, steps, live],
   );
 
   const selectedId = sel?.kind === 'staff' ? sel.id : null;
   const contextZone = sel?.kind === 'zone' ? sel.zone : null;
 
+  /** Live play: moves someone now, swapping with the person there if the place is full. */
+  const moveTo = useCallback(
+    (id: string, job: AssignmentId) => {
+      setSelState(null);
+      if (!plan || !onMove || plan.assignments[id] === job) return;
+      if (assignmentLimit(job, state) === 0) {
+        say('The shop doesn’t have that yet.', true);
+        return;
+      }
+      const who = state.staff.find((s) => s.id === id)?.name;
+      const swapped = Object.entries(plan.assignments).filter(([x, j]) => j === job && x !== id).length >= assignmentLimit(job, state);
+      onMove(id, job);
+      say(`${who} → ${ASSIGNMENT_LABEL[job]}${swapped ? ' (swapped places)' : ''}`);
+    },
+    [plan, onMove, state, say],
+  );
+
   const onZone = useCallback(
     (a: AssignmentId) => {
       if (!selectedId || !plan) return;
+      if (onMove) {
+        moveTo(selectedId, a);
+        return;
+      }
       const count = Object.entries(plan.assignments).filter(([id, x]) => x === a && id !== selectedId).length;
       if (count >= assignmentLimit(a, state)) {
         say(assignmentLimit(a, state) === 0 ? `The shop doesn’t have that yet.` : `${ASSIGNMENT_LABEL[a]} already has ${assignmentLimit(a, state)}. Move someone out first.`, true);
@@ -152,7 +192,7 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
       onPlanChange({ ...plan, assignments: { ...plan.assignments, [selectedId]: a } });
       setSelState(null);
     },
-    [selectedId, plan, onPlanChange, say, state],
+    [selectedId, plan, onPlanChange, say, state, onMove, moveTo],
   );
 
   useEffect(() => {
@@ -170,7 +210,7 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
   const built = notices ? { ...built0, view: { ...built0.view, notices } } : built0;
 
   const jobHints = useMemo(() => {
-    if (phase !== 'plan' || !selectedId || !plan) return undefined;
+    if (!planning || !selectedId || !plan) return undefined;
     const out: Partial<Record<ZoneId, JobHint>> = {};
     for (const z of Object.keys(ZONE_JOB) as ZoneId[]) {
       const job = ZONE_JOB[z];
@@ -182,24 +222,24 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
       out[z] = pv.full ? { text: 'Full', blocked: true } : pv.blocked ? { text: pv.blocked, blocked: true } : { text: pv.yield, blocked: false };
     }
     return out;
-  }, [phase, selectedId, plan, state]);
+  }, [planning, selectedId, plan, state]);
 
   const problemZones = useMemo(() => {
-    if (phase !== 'plan' || !plan || !interactive) return undefined;
+    if (!planning || !plan || !interactive) return undefined;
     const out: Partial<Record<ZoneId, 'urgent' | 'warn'>> = {};
     for (const p of computeProblems(state, plan)) if (out[p.zone] !== 'urgent') out[p.zone] = p.level;
     return out;
-  }, [phase, plan, state, interactive]);
+  }, [planning, plan, state, interactive]);
 
   // Lessons point at one thing at a time: the person, then (once selected) where they should go.
   const lessonTarget = useMemo(() => {
-    if (phase !== 'plan' || !focus) return { staff: [] as string[], zones: [] as ZoneId[] };
+    if (!planning || !focus) return { staff: [] as string[], zones: [] as ZoneId[] };
     if (!focus.staff.length) return { staff: [], zones: focus.zones };
     if (!selectedId) return { staff: [focus.staff[0]], zones: [] };
     const i = focus.staff.indexOf(selectedId);
     if (i < 0) return { staff: [], zones: [] };
     return { staff: [], zones: focus.staff.length === 1 ? focus.zones : [focus.zones[i]] };
-  }, [phase, focus, selectedId]);
+  }, [planning, focus, selectedId]);
 
   // In a lesson, only the target place (and the person's current job) carries a hint.
   const shownHints = useMemo(() => {
@@ -222,28 +262,35 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             assignments={built.assignments}
             activity={built.activity}
             fit={fitFromContext(state.ctx)}
-            selected={phase === 'plan' ? selectedId : null}
+            selected={planning ? selectedId : null}
             onSelectStaff={(id) => setSel(selectedId === id ? null : { kind: 'staff', id })}
             onZone={onZone}
-            context={phase === 'plan' ? contextZone : null}
+            context={planning ? contextZone : null}
             onContext={(z) => setSel(z && contextZone !== z ? { kind: 'zone', zone: z } : null)}
-            interactive={phase === 'plan' && interactive}
-            animating={phase === 'replay'}
+            interactive={planning && interactive}
+            animating={phase === 'replay' || (live && !paused)}
+            onDrop={onMove && interactive ? moveTo : undefined}
+            pops={pops}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}
             highlightStaff={lessonTarget.staff}
             jobHints={shownHints}
             problemZones={problemZones}
-            detail={phase === 'plan' ? contextZone : null}
+            detail={planning ? contextZone : null}
           />
           {replayClock && (
             <p className="stage-chip stage-replay" role="status">
               Replay of what happened · {replayClock}
             </p>
           )}
-          {phase === 'plan' && selectedStaff && (
+          {live && paused && !selectedStaff && (
+            <p className="stage-chip stage-paused" role="status">
+              Paused · press Space to carry on
+            </p>
+          )}
+          {planning && selectedStaff && (
             <p className="stage-chip" role="status">
-              Moving {selectedStaff.name}: click a highlighted place · Esc to cancel
+              Moving {selectedStaff.name}: {live ? 'drag or click a place' : 'click a highlighted place'} · Esc to cancel
             </p>
           )}
           {toast && (
@@ -254,7 +301,8 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
         </div>
         <div className="action-bar">
           <div className="action-tools">{tools?.(ctx)}</div>
-          {primary && (
+          {clock && <div className="action-main">{clock}</div>}
+          {primary && !clock && (
             <div className="action-main">
               {primary.note && <span className={`action-note ${primary.noteTone === 'bad' ? 'bad' : ''}`}>{primary.note}</span>}
               <button type="button" className="btn-primary btn-run" onClick={primary.onClick} disabled={primary.disabled}>
@@ -301,7 +349,7 @@ function outcomeNotices(report: HourReport): ShopNotice[] {
     .map((o) => ({ zone: o.zone, text: o.tag, tone: o.tone }));
 }
 
-function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report: HourReport | null, step: number, plan: HourPlan | null, summary: HourReport | null): Built {
+function buildView(state: SimState, phase: 'plan' | 'replay' | 'results' | 'live', report: HourReport | null, step: number, plan: HourPlan | null, summary: HourReport | null): Built {
   const shelfCap = perDept((d) => shelfCapacity(state, d));
   const promoNow = (h: number) => DEPTS.filter((d) => promotionActive(state, d, h));
   const markdownNow = (h: number) => DEPTS.filter((d) => markdownActive(state, d, h));
@@ -316,8 +364,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
     const cap = perDept((d) =>
       d === 'chilled' && s.fridgeFault ? state.ctx.shelfCap.chilled * CONFIG.events.fridgeFault.capacityShare : state.ctx.shelfCap[d],
     );
-    const abs = report.fromStep + step + 1;
-    const mins = String(Math.min(abs, 6) * 10).padStart(2, '0');
+    const abs = Math.min(report.fromStep + step + 1, CONFIG.stepsPerHour - 1);
     const dropped = report.steps.slice(0, step + 1).reduce((t, x) => t + x.abandoned, 0);
     const acts = Object.fromEntries(stepActivity(report, step).map((x) => [x.id, x.activity]));
     return {
@@ -337,7 +384,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
         markdown: markdownNow(report.hour),
         notices: [],
         tick: `${report.hour}-${report.fromStep}-${step}`,
-        clock: `${hourLabel(report.hour).slice(0, 2)}:${mins === '60' ? '59' : mins}`,
+        clock: clockLabel(report.hour, abs),
       },
       staff,
       assignments,
@@ -348,7 +395,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
   const backroom = perDept((d) => deptUnits(state, d).backroom);
   const dock = DEPTS.reduce((t, d) => t + deptUnits(state, d).dock, 0);
   const planned = plan?.actions ?? [];
-  const clock = state.hour >= state.ctx.hours ? hourLabel(state.ctx.hours) : `${hourLabel(state.hour).slice(0, 2)}:${String((state.step ?? 0) * 10).padStart(2, '0')}`;
+  const clock = state.hour >= state.ctx.hours ? hourLabel(state.ctx.hours) : clockLabel(state.hour, state.step ?? 0);
   const view = storeViewFromState({
     shelf,
     shelfCap,
@@ -357,12 +404,17 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results', report
     queue: state.queue.customers,
     fridgeFault: state.fridge.status === 'fault',
     lorry: false,
-    promo: phase === 'plan' ? [...new Set([...promoNow(state.hour), ...planned.flatMap((a) => (a.kind === 'promotion' ? [a.dept] : []))])] : promoNow(state.hour),
-    markdown: phase === 'plan' ? [...new Set([...markdownNow(state.hour), ...planned.flatMap((a) => (a.kind === 'markdown' ? [a.dept] : []))])] : markdownNow(state.hour),
+    promo: phase === 'plan' || phase === 'live' ? [...new Set([...promoNow(state.hour), ...planned.flatMap((a) => (a.kind === 'promotion' ? [a.dept] : []))])] : promoNow(state.hour),
+    markdown: phase === 'plan' || phase === 'live' ? [...new Set([...markdownNow(state.hour), ...planned.flatMap((a) => (a.kind === 'markdown' ? [a.dept] : []))])] : markdownNow(state.hour),
     dropped: summary ? summary.customersAbandoned : 0,
     notices: summary ? outcomeNotices(summary) : [],
     clock,
   });
+  if (phase === 'live' && state.hour < state.ctx.hours) {
+    // Shoppers browsing: about ten minutes' worth of arrivals, refreshed every ten minutes.
+    view.arrivals = expectedCustomers(state) / 6;
+    view.tick = `${state.hour}-${Math.floor((state.step ?? 0) / 10)}`;
+  }
   if (phase === 'results' && report) {
     const assignments = Object.fromEntries(report.staff.map((r) => [r.id, r.assignment]));
     return { view, staff: state.staff.filter((s) => assignments[s.id]), assignments, activity: hourActivity(report) };

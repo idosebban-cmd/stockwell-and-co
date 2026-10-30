@@ -18,11 +18,11 @@ import {
 import { fixLimits, noBreaks, noReplenishment, oneTill, passive, playShift, sensible, type Strategy } from './bots';
 import { CURATED_SEED, makeScenario } from './scenario';
 import { total } from './stock';
-import { newRecord, rebuild, retryRecord } from './game';
+import { convertRecordV3, newRecord, rebuild, retryRecord } from './game';
 import { clearSave, loadGame, saveGame, SAVE_KEY, type StorageLike } from './save';
 import { summarise } from './summary';
 import { explainHour, previewWarnings } from './explain';
-import type { HourPlan, SimState } from './types';
+import type { SimState } from './types';
 import { stepActivity } from '../ui/activity';
 
 const SEED = CURATED_SEED;
@@ -462,26 +462,27 @@ describe('seeded reproducibility', () => {
   });
   it('a record replays to the same state; retry keeps the seed', () => {
     const shift = playShift(77, sensible);
-    const rec = { ...newRecord(77), setup: recommendedSetup(), plans: shift.plans };
-    const re = rebuild(rec);
-    expect(JSON.stringify(re.state)).toBe(JSON.stringify(shift.state));
+    const rec = convertRecordV3({ seed: 77, setup: recommendedSetup(), plans: shift.plans });
+    const a = rebuild(rec)!;
+    const b = rebuild(JSON.parse(JSON.stringify(rec)))!;
+    expect(JSON.stringify(a.state)).toBe(JSON.stringify(b.state));
+    expect(a.state.hour).toBe(CONFIG.hours);
     const retry = retryRecord(rec);
     expect(retry.seed).toBe(77);
-    expect(retry.plans).toEqual([]);
+    expect(retry.choices).toEqual([]);
   });
 });
 
 describe('save and load', () => {
-  it('round-trips a game mid-shift, including the unsent draft', () => {
+  it('round-trips a game mid-shift', () => {
     const storage = new MemoryStorage();
     const shift = playShift(SEED, sensible);
-    const rec = { ...newRecord(SEED), setup: recommendedSetup(), plans: shift.plans.slice(0, 3) };
-    const draft: HourPlan = shift.plans[3];
-    expect(saveGame(storage, { record: rec, draft })).toBe(true);
+    const rec = { ...convertRecordV3({ seed: SEED, setup: recommendedSetup(), plans: shift.plans.slice(0, 3) }), minute: 3 * CONFIG.stepsPerHour + 25 };
+    expect(saveGame(storage, { record: rec })).toBe(true);
     const loaded = loadGame(storage)!;
     expect(loaded.record).toEqual(rec);
-    expect(loaded.draft).toEqual(draft);
-    expect(rebuild(loaded.record).state!.hour).toBe(3);
+    expect(rebuild(loaded.record)!.state.hour).toBe(3);
+    expect(rebuild(loaded.record)!.state.step).toBe(25);
   });
   it('ignores corrupt or incompatible saves', () => {
     const storage = new MemoryStorage();
@@ -504,10 +505,10 @@ describe('save and load', () => {
         throw new Error('nope');
       },
     };
-    expect(saveGame(broken, { record: newRecord(1), draft: null })).toBe(false);
+    expect(saveGame(broken, { record: newRecord(1) })).toBe(false);
     expect(loadGame(broken)).toBeNull();
     expect(() => clearSave(broken)).not.toThrow();
-    expect(saveGame(null, { record: newRecord(1), draft: null })).toBe(false);
+    expect(saveGame(null, { record: newRecord(1) })).toBe(false);
   });
 });
 
@@ -617,14 +618,14 @@ describe('short intervals', () => {
     let sold = 0;
     let wasted = 0;
     for (let i = 0; i < 3; i++) {
-      const r = runSteps(s, plan, 2);
+      const r = runSteps(s, plan, 20);
       s = r.state;
-      expect(r.report.toStep - r.report.fromStep).toBe(2);
+      expect(r.report.toStep - r.report.fromStep).toBe(20);
       sold += DEPTS.reduce((t, d) => t + r.report.dept[d].sold, 0);
       wasted += r.report.waste.reduce((t, w) => t + w.qty, 0);
       if (i < 2) {
         expect(s.hour).toBe(0);
-        expect(s.step).toBe((i + 1) * 2);
+        expect(s.step).toBe((i + 1) * 20);
       }
     }
     expect(s.hour).toBe(1);
@@ -639,10 +640,28 @@ describe('short intervals', () => {
   it('a short interval never runs past the end of the hour', async () => {
     const { runSteps } = await import('./engine');
     let s = startDay(SEED, recommendedSetup());
-    s = runSteps(s, defaultPlan(s), 4).state;
-    const r = runSteps(s, defaultPlan(s), 5);
-    expect(r.report.toStep).toBe(6);
+    s = runSteps(s, defaultPlan(s), 40).state;
+    const r = runSteps(s, defaultPlan(s), 50);
+    expect(r.report.toStep).toBe(CONFIG.stepsPerHour);
     expect(r.state.hour).toBe(1);
+  });
+  it('gives the same day whether it is run an hour at a time or minute by minute', async () => {
+    const { runSteps } = await import('./engine');
+    let a = startDay(SEED, recommendedSetup());
+    let b = a;
+    for (let h = 0; h < 3; h++) {
+      const plan = defaultPlan(a);
+      a = runSteps(a, plan, CONFIG.stepsPerHour).state;
+      for (let m = 0; m < CONFIG.stepsPerHour; m++) b = runSteps(b, plan, 1).state;
+    }
+    expect(b.hour).toBe(a.hour);
+    expect(b.cash).toBeCloseTo(a.cash, 6);
+    expect(b.ledger.revenue).toBeCloseTo(a.ledger.revenue, 6);
+    expect(b.satisfaction.weightedSum).toBeCloseTo(a.satisfaction.weightedSum, 6);
+    expect(b.staff.map((s) => s.energy)).toEqual(a.staff.map((s) => expect.closeTo(s.energy, 6)));
+    // History keeps one report per hour either way.
+    expect(b.history.length).toBe(3);
+    expect(b.history[1].customersServed).toBeCloseTo(a.history[1].customersServed, 6);
   });
 });
 

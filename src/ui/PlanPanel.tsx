@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CONFIG, DEPTS, deptName, hourLabel, hourRange, type DeptId, type PriceTier } from '../sim/config';
 import {
+  STEP_MINUTES,
   actionKey,
   assignmentLimit,
   backroomCapacity,
@@ -9,7 +10,6 @@ import {
   expectedCustomers,
   money,
   onShift,
-  planErrors,
   productivity,
   shelfCapacity,
   shortDatedUnits,
@@ -50,18 +50,10 @@ export interface PanelOptions {
   pricing: 'all' | DeptId | 'none';
 }
 
-export const FULL_GAME: PanelOptions = { steps: 6, allowActions: true, pricing: 'all' };
+export const FULL_GAME: PanelOptions = { steps: CONFIG.stepsPerHour, allowActions: true, pricing: 'all' };
 
 export function intervalLabel(steps: number): string {
-  return steps >= 6 ? 'hour' : `${steps * 10} minutes`;
-}
-
-/** Spend and blocking errors shown beside the run button. */
-export function runNote(state: SimState, plan: HourPlan): { note?: string; tone?: 'bad'; disabled: boolean } {
-  const errors = planErrors(state, plan);
-  if (errors.length) return { note: errors[0], tone: 'bad', disabled: true };
-  const spend = plan.actions.reduce((t, a) => t + describeAction(state, a).cost, 0);
-  return { note: spend > 0 ? `Spending ${money(spend)} · cash after ${money(state.cash - spend)}` : undefined, disabled: false };
+  return steps >= CONFIG.stepsPerHour ? 'hour' : `${Math.round(steps * STEP_MINUTES)} minutes`;
 }
 
 export function PanelHead({ title, kicker, onClose }: { title: string; kicker?: string; onClose?: () => void }) {

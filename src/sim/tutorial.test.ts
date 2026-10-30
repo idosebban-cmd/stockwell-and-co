@@ -91,8 +91,8 @@ describe('insight', () => {
     const s = lesson('serve').build();
     const p0 = lessonPlan(s);
     const p1 = withJobs(p0, { bev: 'tills' });
-    const a = outlook(s, p0, 3)!;
-    const b = outlook(s, p1, 3)!;
+    const a = outlook(s, p0, 30)!;
+    const b = outlook(s, p1, 30)!;
     const tills = (o: typeof a) => o.rows.find((r) => r.zone === 'tills')!;
     expect(tills(b).can).toBeGreaterThan(tills(a).can);
     expect(tills(a).status).toBe('short');

@@ -1,6 +1,6 @@
 /**
- * The week's own screens: before opening (forecast and order), the
- * improvement offers at closing, and the end of the week.
+ * Your shop's own screens: before opening (forecast and order) and the
+ * improvement offers at closing.
  */
 import { useMemo, useState } from 'react';
 import { CONFIG, deptName, hourLabel, type ChilledLife, type DeptId } from '../sim/config';
@@ -9,9 +9,8 @@ import { ROSTER } from '../sim/roster';
 import {
   allOffers,
   businessValue,
-  CAMPAIGN_DAYS,
-  campaignGoal,
   carriedQty,
+  creditRoom,
   dayConfig,
   dayContext,
   dayScenario,
@@ -22,17 +21,19 @@ import {
   type CampaignState,
   type Offer,
   type UpgradeId,
+  weekOf,
+  WEEK_DAYS,
 } from '../sim/campaign';
 import type { SetupPlan, SimState } from '../sim/types';
 import { ShopScreen } from './ShopScreen';
-import { Clock, CueArt, EquipArt, Lorry, Person, ResultIcon, Sunrise, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
+import { Clock, CueArt, EquipArt, Lorry, Person, Sunrise, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
 import { SPECIALITY_TEXT } from '../sim/roster';
 import type { ShopNotice, ZoneId } from './Store';
 
 const K = CONFIG.campaign;
 
 export function dayKicker(day: number): string {
-  return `${weekdayName(day)} · day ${day + 1} of ${CAMPAIGN_DAYS}`;
+  return `${weekdayName(day)} · week ${weekOf(day) + 1}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +87,9 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
   }, [camp, order, check.errors.length]);
   const plan = useMemo(() => defaultPlan(preview), [preview]);
   const cfg = dayConfig(camp.day);
-  const after = camp.cash - check.cost;
+  // Beyond cash and the overdraft, stock goes on the wholesaler's account.
+  const onAccount = Math.min(creditRoom(camp), Math.max(0, check.cost - Math.max(0, camp.cash + K.overdraftLimit)));
+  const after = camp.cash - check.cost + onAccount;
   const set = (d: DeptId, k: 'morning' | 'midday', v: number) => setOrder((o) => ({ ...o, orders: { ...o.orders, [d]: { ...o.orders[d], [k]: Math.max(0, Math.round(v)) } } }));
   const setLife = (k: 'morning' | 'midday', l: ChilledLife) => setOrder((o) => ({ ...o, chilledLife: { ...o.chilledLife, [k]: l } }));
   const cues = cuesFor(camp, ctx);
@@ -119,7 +122,7 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
         label: 'Confirm order & open ▶',
         onClick: () => onOpen(order),
         disabled: check.errors.length > 0,
-        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading${after < 0 ? ` (uses ${money(-after)} of the overdraft)` : ''}`,
+        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading${onAccount > 0 ? ` (${money(onAccount)} on account)` : after < 0 ? ` (uses ${money(-after)} of the overdraft)` : ''}`,
         noteTone: check.errors.length ? 'bad' : undefined,
       }}
       panel={() => (
@@ -131,7 +134,7 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
             <strong className="brief-hours">
               {hourLabel(0)}–{hourLabel(cfg.hours)}
             </strong>
-            <span className="today-badge">Today: {pounds(cfg.profitTarget)} profit</span>
+            <span className="today-badge">Day {camp.day + 1}</span>
           </div>
           <MiniForecast forecast={sc.forecast} />
 
@@ -222,7 +225,13 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
             </button>
           </div>
           {orderInfo && <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the shelf and stockroom space, and your cash.</p>}
-          <WeekGoals camp={camp} />
+          {(onAccount > 0 || camp.credit > 0.5) && (
+            <p className="credit-note">
+              {onAccount > 0
+                ? `Short of cash: the wholesaler puts up to ${pounds(K.supplierCredit.limit)} of stock on account, repaid from takings.`
+                : `Owed to the wholesaler: ${money(camp.credit)}, repaid from takings.`}
+            </p>
+          )}
         </div>
       )}
     />
@@ -230,58 +239,15 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
 }
 
 function DayMarkers({ day }: { day: number }) {
+  const today = day % WEEK_DAYS;
   return (
-    <ol className="days" aria-label={`Day ${day + 1} of ${CAMPAIGN_DAYS}: ${weekdayName(day)}`}>
-      {Array.from({ length: CAMPAIGN_DAYS }, (_, i) => (
-        <li key={i} className={i < day ? 'past' : i === day ? 'today' : ''} aria-hidden="true">
+    <ol className="days" aria-label={`Day ${day + 1}: ${weekdayName(day)}, week ${weekOf(day) + 1}`}>
+      {Array.from({ length: WEEK_DAYS }, (_, i) => (
+        <li key={i} className={i < today ? 'past' : i === today ? 'today' : ''} aria-hidden="true">
           {weekdayName(i, true)}
         </li>
       ))}
     </ol>
-  );
-}
-
-/** "Week goals · 2 of 3 met now", opening to the three goals; the accounting behind a second control. */
-export function WeekGoals({ camp }: { camp: CampaignState }) {
-  const [open, setOpen] = useState(false);
-  const [how, setHow] = useState(false);
-  const g = campaignGoal(camp);
-  const rows = [
-    { label: 'Business value', now: pounds(g.value), target: pounds(g.target), met: g.met.value },
-    { label: 'Reputation', now: `${Math.round(g.reputation)}`, target: `${K.objective.reputation}`, met: g.met.reputation },
-    { label: 'Team wellbeing', now: `${Math.round(g.wellbeing)}`, target: `${K.objective.wellbeing}`, met: g.met.wellbeing },
-  ];
-  const met = rows.filter((r) => r.met).length;
-  return (
-    <div className="week-goals">
-      <button type="button" className="tool-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        Week goals · {met} of 3 met now
-      </button>
-      {open && (
-        <div className="wg-body">
-          <p className="report-note">Checked on Saturday night, at closing.</p>
-          <ul>
-            {rows.map((r) => (
-              <li key={r.label}>
-                <span>{r.label}</span>
-                <span>
-                  <strong>{r.now}</strong> / {r.target} <span className={r.met ? 'good' : 'muted'}>{r.met ? '✓' : '·'}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="btn-link" aria-expanded={how} onClick={() => setHow((h) => !h)}>
-            How calculated
-          </button>
-          {how && (
-            <p className="report-note">
-              Business value is cash, plus stock and equipment at what they cost, minus any overdraft. The week started at {pounds(camp.startValue)}; the goal is{' '}
-              {pounds(K.objective.growth)} more. Buying stock or equipment moves money into the business rather than spending it.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -539,7 +505,7 @@ export function ValueLines({ camp }: { camp: CampaignState }) {
         </tr>
         {v.debt > 0 && (
           <tr>
-            <th scope="row">Overdraft</th>
+            <th scope="row">{camp.credit > 0.5 ? 'Overdraft and wholesaler’s account' : 'Overdraft'}</th>
             <td>−{money(v.debt)}</td>
           </tr>
         )}
@@ -548,118 +514,10 @@ export function ValueLines({ camp }: { camp: CampaignState }) {
           <td>{money(v.total)}</td>
         </tr>
         <tr>
-          <th scope="row">At the start of the week</th>
+          <th scope="row">When you took over</th>
           <td>{money(camp.startValue)}</td>
         </tr>
       </tbody>
     </table>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The end of the week
-// ---------------------------------------------------------------------------
-
-export function WeekResult({ camp, onNewWeek, onQuick }: { camp: CampaignState; onNewWeek: () => void; onQuick: () => void }) {
-  const [report, setReport] = useState(false);
-  const g = campaignGoal(camp);
-  const scores = [
-    { key: 'value' as const, label: 'Business value', display: pounds(g.value), target: pounds(g.target), met: g.met.value },
-    { key: 'customers' as const, label: 'Reputation', display: `${Math.round(g.reputation)}`, target: `${K.objective.reputation}`, met: g.met.reputation },
-    { key: 'staff' as const, label: 'Team wellbeing', display: `${Math.round(g.wellbeing)}`, target: `${K.objective.wellbeing}`, met: g.met.wellbeing },
-  ];
-  const met = scores.filter((s) => s.met).length;
-  const best = [...camp.results].sort((a, b) => b.profit - a.profit)[0];
-  const invested = camp.equipment;
-  const takeaway = `${met === 3 ? 'A stronger shop than on Sunday.' : g.met.value ? 'The shop is worth more than on Sunday.' : `Business value ended ${money(g.target - g.value)} short of the goal.`} Best day: ${weekdayName(best?.day ?? 6)}, ${money(best?.profit ?? 0)} profit.${invested > 0 ? ` You put ${money(invested)} into equipment.` : ''}`;
-  return (
-    <main className="result" id="main">
-      <section className="result-card" aria-labelledby="week-h">
-        <div className="result-top">
-          <div>
-            <p className="panel-kicker">Saturday night</p>
-            <h1 id="week-h">Week complete</h1>
-          </div>
-          <ul className="indicators" aria-label={`${met} of 3 goals met`}>
-            {scores.map((x) => (
-              <li key={x.key} className={x.met ? 'met' : 'missed'}>
-                <ResultIcon kind={x.key} />
-                <span className="ind-text">
-                  <span className="ind-label">{x.label}</span>
-                  <span className="ind-value">{x.display}</span>
-                  <span className="ind-target">
-                    <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> target {x.target}
-                    <span className="sr-only">{x.met ? ', met' : ', missed'}</span>
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        {!report && <p className="takeaway">{takeaway}</p>}
-        {report && (
-          <div className="report-panel">
-            <table className="mini-table">
-              <thead>
-                <tr>
-                  <th scope="col">Day</th>
-                  <th scope="col">Profit</th>
-                  <th scope="col">Goal</th>
-                  <th scope="col">Customers</th>
-                  <th scope="col">Gave up</th>
-                  <th scope="col">Reputation</th>
-                  <th scope="col">Business value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {camp.results.map((r) => (
-                  <tr key={r.day}>
-                    <th scope="row">{weekdayName(r.day)}</th>
-                    <td>{money(r.profit)}</td>
-                    <td>{r.met ? '✓' : '✗'} {money(r.target)}</td>
-                    <td>{Math.round(r.customers)}</td>
-                    <td>{Math.round(r.walkouts)}</td>
-                    <td>{Math.round(r.reputationAfter)}</td>
-                    <td>{money(r.valueEnd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <ValueLines camp={camp} />
-          </div>
-        )}
-        <div className="result-actions">
-          <button type="button" className="btn-primary btn-run" onClick={onNewWeek} autoFocus>
-            Play another week
-          </button>
-          <button type="button" className="btn-secondary" aria-expanded={report} onClick={() => setReport((r) => !r)}>
-            {report ? 'Hide report' : 'View report'}
-          </button>
-          <button type="button" className="btn-link" onClick={onQuick}>
-            Quick play
-          </button>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-export function FailedWeek({ camp, onRestart, onNewWeek }: { camp: CampaignState; onRestart: () => void; onNewWeek: () => void }) {
-  return (
-    <main className="result" id="main">
-      <section className="result-card">
-        <p className="panel-kicker">{weekdayName(Math.max(0, camp.day - 1))}</p>
-        <h1>The bank has called time</h1>
-        <p className="takeaway">{camp.failed} The shop can’t buy stock or pay wages tomorrow, so the week ends here.</p>
-        <div className="result-actions">
-          <button type="button" className="btn-primary btn-run" onClick={onRestart} autoFocus>
-            Restart {weekdayName(Math.max(0, camp.day - 1))}
-          </button>
-          <button type="button" className="btn-link" onClick={onNewWeek}>
-            Start a new week
-          </button>
-        </div>
-      </section>
-    </main>
   );
 }

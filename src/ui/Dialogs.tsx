@@ -34,34 +34,40 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 export function Help({ onClose }: { onClose: () => void }) {
   const T = CONFIG.targets;
+  const K = CONFIG.campaign;
   return (
     <Modal title="How to play" onClose={onClose}>
       <div className="help">
         <p>
-          <strong>The week:</strong> run the shop from Sunday to Saturday. Each day has a profit goal. By Saturday night, aim for business value of{' '}
-          <strong>{money(CONFIG.campaign.objective.growth)}</strong> more than you started with, reputation <strong>{CONFIG.campaign.objective.reputation}+</strong> and
-          team wellbeing <strong>{CONFIG.campaign.objective.wellbeing}+</strong>. Days start short and quiet and get longer and busier; new things (deliveries,
-          prices, chilled food) arrive as you go.
+          <strong>Your shop:</strong> run Stockwell &amp; Co day after day, Sunday to Saturday and round again. There’s no deadline and no failing: take your time, grow the
+          business and look after the team. Days start short and quiet; new things (deliveries, prices, chilled food) arrive as you go, and each week brings a few more shoppers.
         </p>
         <p>
-          <strong>Quick play:</strong> one Saturday, 09:00–17:00, in the fully fitted shop. Win with <strong>{money(T.operatingProfit)}</strong> operating profit,
+          <strong>Quick play:</strong> one Saturday, 09:00–17:00, in the fully fitted shop. Aim for <strong>{money(T.operatingProfit)}</strong> operating profit,
           satisfaction <strong>{T.satisfaction}+</strong> and wellbeing <strong>{T.wellbeing}+</strong>.
         </p>
-        <h3>Each morning (the week)</h3>
-        <p>Check the forecast and confirm the recommended stock order (or adjust it). Nothing is bought until you open the shop.</p>
-        <h3>After closing (the week)</h3>
+        <h3>The clock</h3>
         <p>
-          You keep cash and stock that is still in date. Staff rest overnight, but long days without breaks build up. Reputation moves part of the way towards how
-          customers felt that day. You can buy an improvement (another person, a third till, more shelving, a chilled department, better refrigeration) or save the
-          money.
+          The shop runs in real time: an hour takes about a minute at 1x. <strong>Space</strong> pauses and carries on; 1, 2 and 3 set the speed. While paused you can still
+          move people and take actions, then carry on to see what happens.
         </p>
-        <h3>Each hour</h3>
+        <h3>Each morning</h3>
+        <p>
+          Check the forecast and confirm the recommended stock order (or adjust it). Nothing is bought until you open the shop. Short of cash? The wholesaler puts up to{' '}
+          {money(K.supplierCredit.limit)} of stock on account and takes part of the takings until it is paid off.
+        </p>
+        <h3>During the day</h3>
         <ol>
+          <li>Drag a person to a place to give them that job; they walk over and start straight away. (Or click a person, then a place.) Moving someone to a full place swaps them with the person there.</li>
+          <li>Send people to the break room: a break lasts half an hour, then they go back to what they were doing.</li>
           <li>Check <strong>Needs attention</strong> under the shop, or click a red or yellow “!” on a fixture. Each opens the problem with the actions that work, their cost and timing.</li>
-          <li>Click a person, then a highlighted place, to move them (or choose from the list in their panel). <strong>Team</strong> shows everyone at once.</li>
           <li>Click a department to see its stock, who is filling it and its price. <strong>Change prices</strong> compares Low, Regular and High.</li>
-          <li>Press <strong>Run next hour</strong> (or R). Watch the replay or skip it, then read the short summary; <strong>View details</strong> has the rest.</li>
         </ol>
+        <h3>After closing</h3>
+        <p>
+          You keep cash and stock that is still in date. Staff rest overnight, but long days without breaks build up. Reputation moves part of the way towards how customers felt that
+          day. You can buy an improvement (another person, a third till, more shelving, a chilled department, better refrigeration) or save the money.
+        </p>
         <h3>How the shop works</h3>
         <ul>
           <li>
@@ -84,7 +90,8 @@ export function Help({ onClose }: { onClose: () => void }) {
             tills. Which pays depends on the stock you have, how long it keeps and how busy the tills are.
           </li>
           <li>
-            <strong>Dates:</strong> Friday’s produce goes past its best at 13:00. Chilled comes short-dated (“use by Sunday”, cheaper; binned at close if unsold, as we are closed Sundays) or longer-life (dearer, keeps). You choose per delivery when you customise the opening order. Cupboard stock keeps.
+            <strong>Dates:</strong> stock is dated “use by” a day and binned if it passes it. Chilled comes short-dated (cheaper; binned at closing if unsold) or longer-life
+            (dearer, keeps). Cupboard stock keeps.
           </li>
         </ul>
         <h3>In the shop</h3>
@@ -94,7 +101,9 @@ export function Help({ onClose }: { onClose: () => void }) {
           <li>Counts and energy show when you select a place or a person.</li>
         </ul>
         <h3>Keyboard</h3>
-        <p>Tab through controls; Enter or Space to press. R runs the hour; Escape cancels a selection or closes this box.</p>
+        <p>
+          Space pauses; 1, 2, 3 set the speed. Tab to a person and press Enter, then Tab to a place and press Enter to move them. Escape cancels a selection or closes this box.
+        </p>
       </div>
     </Modal>
   );
@@ -105,23 +114,14 @@ export function SettingsDialog({ settings, onChange, onClose }: { settings: Sett
     <Modal title="Settings" onClose={onClose}>
       <div className="settings">
         <label className="check">
-          <input type="checkbox" checked={settings.reducedMotion} onChange={(e) => onChange({ reducedMotion: e.target.checked })} />
-          Reduced motion (no walking shoppers; replay steps without movement)
+          <input type="checkbox" checked={settings.sound} onChange={(e) => onChange({ sound: e.target.checked })} />
+          Sound (a soft ding when the tills take money)
         </label>
         <label className="check">
-          <input type="checkbox" checked={settings.skipReplay} onChange={(e) => onChange({ skipReplay: e.target.checked })} />
-          Skip the replay and go straight to results
+          <input type="checkbox" checked={settings.reducedMotion} onChange={(e) => onChange({ reducedMotion: e.target.checked })} />
+          Reduced motion (no walking, no coin pops)
         </label>
-        <fieldset className="radio-row">
-          <legend>Replay speed</legend>
-          <label>
-            <input type="radio" name="speed" checked={settings.replaySpeed === 'normal'} onChange={() => onChange({ replaySpeed: 'normal' })} /> Normal
-          </label>
-          <label>
-            <input type="radio" name="speed" checked={settings.replaySpeed === 'fast'} onChange={() => onChange({ replaySpeed: 'fast' })} /> Fast
-          </label>
-        </fieldset>
-        <p className="tiny muted">Replay settings never change results.</p>
+        <p className="tiny muted">Settings are remembered on this device and never change results.</p>
       </div>
     </Modal>
   );

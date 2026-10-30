@@ -4,7 +4,7 @@
  */
 import { CONFIG, DEPTS, deptName, hourLabel, type DeptId } from './config';
 import { ASSIGNMENT_LABEL } from './roster';
-import { deptUnits, expectedCustomers, money, onShift, runHour, shelfCapacity } from './engine';
+import { STEP_MINUTES, deptUnits, expectedCustomers, money, onShift, runHour, shelfCapacity } from './engine';
 import { total } from './stock';
 import type { HourPlan, HourReport, SimState } from './types';
 
@@ -170,7 +170,7 @@ export function explainHour(report: HourReport): Note[] {
 
   for (const d of DEPTS) {
     const r = report.dept[d];
-    const mins = r.shelfEmptySteps * 10;
+    const mins = Math.round(r.shelfEmptySteps * STEP_MINUTES);
     if (r.lostShelfGap >= 5) {
       const where = r.backroomEnd < 1 && r.dockEnd > 0 ? 'stock was still waiting on the dock' : 'stock was sitting in the stockroom';
       notes.push({
