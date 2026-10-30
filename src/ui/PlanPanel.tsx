@@ -427,6 +427,8 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
   if (opts.allowActions) {
     if (CONFIG.departments[d].perishable) actions.push({ kind: 'markdown', dept: d });
     actions.push({ kind: 'promotion', dept: d }, { kind: 'emergency', dept: d });
+    // Anyone working (not on a break) can be sent to the cash-and-carry for this department.
+    for (const s of onShift(state)) if (!s.isTemp && plan.assignments[s.id] !== 'break' && plan.assignments[s.id] !== 'task') actions.push({ kind: 'cashAndCarry', dept: d, staffId: s.id });
   }
   const allowed = actions.filter((a) => state.ctx.actions.includes(a.kind));
   return (
@@ -442,7 +444,10 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
               Stock is on the dock: unload it first →
             </button>
           ) : u.backroom < 1 && opts.allowActions ? (
-            <p className="tiny bad">None in the stockroom. An emergency order arrives next hour.</p>
+            <p className="tiny bad">
+              None in the stockroom. Under More actions: a rush delivery (on the dock in {CONFIG.actions.emergency.arrivalMinutes} minutes) or a cash-and-carry run
+              {state.ctx.pricing ? '; or raise the price to make what’s left last' : ''}.
+            </p>
           ) : null}
         </div>
       )}
@@ -826,7 +831,11 @@ function actionShortLabel(a: ActionRequest): string {
     case 'promotion':
       return 'Promote';
     case 'emergency':
-      return 'Emergency order';
+      return 'Rush delivery';
+    case 'cashAndCarry':
+      return `Cash-and-carry: send ${ROSTER.find((r) => r.id === a.staffId)?.name ?? 'someone'}`;
+    case 'letRunOut':
+      return 'Let it run out';
     case 'temp':
       return 'Book temp';
     case 'repair':

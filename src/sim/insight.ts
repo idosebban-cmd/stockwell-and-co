@@ -7,7 +7,7 @@
  * (no hidden variation, no unannounced events), so it is an estimate, never
  * a promise. Outcomes read recorded results only.
  */
-import { BURST_TEXT, burstAtDoor, taskLabel } from './floor';
+import { BURST_TEXT, burstAtDoor, taskLabel, taskText } from './floor';
 import { CONFIG, DEPTS, PRICE_TIERS, deptName, type DeptId, type PriceTier } from './config';
 import {
   actionKey,
@@ -308,7 +308,7 @@ export function problems(state: SimState, plan: HourPlan, look: Outlook | null =
   for (const t of state.floor?.tasks ?? []) {
     if (t.assigned) continue;
     const where: Zone = t.place === 'entrance' ? 'tills' : t.place;
-    out.push({ zone: where, level: 'warn', title: `${taskLabel(t)} · drag someone onto the “!”`, floor: true });
+    out.push({ zone: where, level: t.expiresAt !== null ? 'urgent' : 'warn', title: `${taskText(t, state.hour * STEPS + (state.step ?? 0))}: drag someone onto the “!”`, floor: true });
   }
   return out;
 }

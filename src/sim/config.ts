@@ -68,6 +68,12 @@ export const CONFIG = {
       minGapMinutes: 6,
       /** The first job of the day appears within this many minutes of opening, so there's something to do from the start. */
       firstWithinMinutes: 15,
+      /** What a shopper needing help is looking for, by department. */
+      helpItems: {
+        produce: ['fresh ginger', 'ripe avocados', 'spring onions', 'fresh mint'],
+        chilled: ['oat milk', 'halloumi', 'fresh pasta', 'crème fraîche'],
+        ambient: ['tea bags', 'gravy granules', 'tinned chickpeas', 'birthday candles', 'golden syrup'],
+      } as Record<DeptId, string[]>,
       /** Never more than this many open at once (new ones wait). */
       maxOpen: 3,
       /** Satisfaction lost each minute, per open job nobody is on, capped in total. */
@@ -78,6 +84,8 @@ export const CONFIG = {
         priceCheck: { label: 'Price check at the till', short: 'Price check', where: ['tills'], work: 1, expires: 8, penalty: 6, weight: 2 },
         pallet: { label: 'Cage blocking the aisle', short: 'Cage in aisle', where: ['ambient', 'chilled', 'produce'], work: 2, expires: null, penalty: 4, weight: 2 },
         baskets: { label: 'Baskets running out at the door', short: 'Baskets', where: ['entrance'], work: 1, expires: null, penalty: 4, weight: 2 },
+        /** Not a floor job: someone out at the cash-and-carry (`actions.cashAndCarry`). Never spawns by itself. */
+        errand: { label: 'At the cash-and-carry', short: 'Cash-and-carry', where: ['entrance'], work: 30, expires: null, penalty: 0, weight: 0 },
       } satisfies Record<string, TaskKindConfig>,
     },
     /** Questions that pause the day. Kinds and their numbers; at most `maxPerDay`. */
@@ -330,13 +338,23 @@ export const CONFIG = {
       durationHours: 2,
       maxPerDay: 2,
     },
+    /** Rush delivery from the wholesaler: dearer, on the dock (to unload) this many minutes after ordering. */
     emergency: {
       qty: 120,
       costMult: 1.5,
-      deliveryFee: 30,
-      delayHours: 1,
+      deliveryFee: 25,
+      arrivalMinutes: 20,
       maxPerDay: 2,
     },
+    /** Send someone to the cash-and-carry: away for `minutes`, back with a small amount straight into the stockroom. */
+    cashAndCarry: {
+      qty: 60,
+      costMult: 1.25,
+      minutes: 30,
+      maxPerDay: 2,
+    },
+    /** Warn when a department's stock (shelf, stockroom, dock and deliveries due) will run out within this many minutes at the forecast rate. */
+    runOutWarnMinutes: 45,
     temp: {
       bookingFee: 40,
       hourlyFee: 19,
@@ -374,7 +392,7 @@ export const CONFIG = {
     /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */
     unlocks: {
       pricing: 2,
-      actions: { emergency: 1, markdown: 2, promotion: 2, temp: 3, repair: 3 },
+      actions: { emergency: 0, cashAndCarry: 0, letRunOut: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
     },
     /**
      * The first days forgive mistakes rather than lowering the activity: shoppers wait longer before giving up,
@@ -420,6 +438,11 @@ export const CONFIG = {
     overnight: { produceShrink: 0.03 },
     /** The bank lets the morning order take cash this far below zero (counted as debt). */
     overdraftLimit: 500,
+    /**
+     * Recommended orders buy the forecast times this: room for the day's bursts of shoppers (about 15% more) and the hidden
+     * variation, more for cupboard stock, which keeps. Space and cash still cap it.
+     */
+    orderCover: { perishable: 1.25, ambient: 1.35 },
     /** Recommended orders keep this many hours of wages and costs back (the rest is paid from takings). */
     orderReserveHours: 1,
     days: [

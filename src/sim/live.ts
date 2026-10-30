@@ -309,10 +309,16 @@ export function advance(input: Live, minutes: number): { live: Live; reports: Ho
   return { live, reports };
 }
 
+/** Out at the cash-and-carry. */
+export function isAway(state: SimState, staffId: string): boolean {
+  return !!state.floor?.tasks.some((t) => t.kind === 'errand' && t.assigned === staffId);
+}
+
 /** Why a job change can't be made, or null. */
 export function jobProblem(live: Live, staffId: string, job: AssignmentId): string | null {
   const s = onShift(live.state).find((x) => x.id === staffId);
   if (!s) return 'Not on shift yet.';
+  if (isAway(live.state, staffId)) return `${s.name} is out at the cash-and-carry.`;
   if (isClosed(live)) return 'The shop is closed.';
   const lim = assignmentLimit(job, live.state);
   if (lim === 0) return 'The shop doesn’t have that yet.';
@@ -325,6 +331,7 @@ export function jobProblem(live: Live, staffId: string, job: AssignmentId): stri
  */
 export function moveStaff(live: Live, staffId: string, job: AssignmentId): Record<string, AssignmentId> | null {
   if (jobProblem(live, staffId, job)) return null;
+  if (isAway(live.state, staffId)) return null;
   const cur = live.plan.assignments[staffId];
   if (cur === job) return null;
   // Someone leaving a floor job (or a break) swaps into where they were going back to.
@@ -345,6 +352,8 @@ export function choose(input: Live, c: Choice): Live {
   switch (c.kind) {
     case 'jobs': {
       const plan = { ...live.plan, assignments: { ...c.assignments } };
+      // Someone out at the cash-and-carry stays out.
+      for (const t of live.state.floor?.tasks ?? []) if (t.kind === 'errand' && t.assigned) plan.assignments[t.assigned] = 'task';
       const breakUntil = { ...live.breakUntil };
       const returnTo = { ...live.returnTo };
       let state = live.state;
@@ -372,12 +381,28 @@ export function choose(input: Live, c: Choice): Live {
     case 'prices':
       if (!live.state.ctx.pricing && DEPTS.some((d) => c.pricing[d] !== live.plan.pricing[d])) throw new Error('Prices can’t be changed yet.');
       return { ...live, plan: { ...live.plan, pricing: { ...c.pricing } } };
-    case 'action':
-      return { ...live, state: takeAction(live.state, c.action) };
+    case 'action': {
+      const state = takeAction(live.state, c.action);
+      if (c.action.kind !== 'cashAndCarry') return { ...live, state };
+      // Off to the cash-and-carry: back to their job when the run is done.
+      const id = c.action.staffId;
+      const was = live.plan.assignments[id];
+      for (const t of state.floor?.tasks ?? []) if (t.assigned === id && t.kind !== 'errand') t.assigned = null;
+      const breakUntil = { ...live.breakUntil };
+      delete breakUntil[id];
+      return settle({
+        ...live,
+        state,
+        plan: { ...live.plan, assignments: { ...live.plan.assignments, [id]: 'task' } },
+        returnTo: { ...live.returnTo, [id]: was === 'task' || was === 'break' ? (live.returnTo[id] ?? 'tills') : was },
+        breakUntil,
+      });
+    }
     case 'task': {
       const task = live.state.floor?.tasks.find((t) => t.id === c.taskId);
       if (!task) throw new Error('That job has already gone.');
       if (!onShift(live.state).some((s) => s.id === c.staffId)) throw new Error('Not on shift.');
+      if (task.kind === 'errand' || isAway(live.state, c.staffId)) throw new Error('Out at the cash-and-carry.');
       if (task.assigned === c.staffId) return live;
       const state = structuredClone(live.state);
       for (const t of state.floor!.tasks) {

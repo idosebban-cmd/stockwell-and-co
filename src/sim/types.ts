@@ -72,6 +72,8 @@ export interface PendingDelivery {
   life?: ChilledLife;
   /** Hour it was originally due (for delays). */
   originalHour: number;
+  /** Rush deliveries arrive at a minute (step since opening) rather than an hour. */
+  arrivesAtStep?: number;
 }
 
 export interface TimedEffect {
@@ -108,6 +110,9 @@ export type ActionRequest =
   | { kind: 'markdown'; dept: DeptId }
   | { kind: 'promotion'; dept: DeptId }
   | { kind: 'emergency'; dept: DeptId }
+  | { kind: 'cashAndCarry'; dept: DeptId; staffId: string }
+  /** Accept that a department will run out today (no more warnings). */
+  | { kind: 'letRunOut'; dept: DeptId }
   | { kind: 'temp' }
   | { kind: 'repair' };
 
@@ -198,7 +203,7 @@ export interface SimState {
   deliveries: PendingDelivery[];
   markdowns: TimedEffect[];
   promotions: TimedEffect[];
-  used: { markdown: DeptId[]; promotions: number; emergency: number; temp: boolean; repair: boolean };
+  used: { markdown: DeptId[]; promotions: number; emergency: number; temp: boolean; repair: boolean; cashAndCarry?: number };
   fridge: FridgeState;
   satisfaction: { weightedSum: number; customers: number };
   history: HourReport[];
@@ -211,7 +216,7 @@ export interface SimState {
   floor?: Floor;
 }
 
-export type TaskKind = 'spill' | 'help' | 'priceCheck' | 'pallet' | 'baskets';
+export type TaskKind = 'spill' | 'help' | 'priceCheck' | 'pallet' | 'baskets' | 'errand';
 export type FloorEventKind = 'breakRequest' | 'favour' | 'nearDate' | 'complaint' | 'donation';
 
 /** A short spike of shoppers on top of the hour's forecast. Times are steps since opening. */
@@ -238,6 +243,8 @@ export interface FloorTask {
   assigned: string | null;
   /** Step at which it goes away by itself if nobody has come. */
   expiresAt: number | null;
+  /** A cash-and-carry run: what comes back into the stockroom. */
+  brings?: { dept: DeptId; qty: number; unitCost: number };
 }
 
 export interface FloorEvent {
@@ -265,6 +272,8 @@ export interface Floor {
   counts: { resolved: number; expired: number; answered: number };
   /** What the last answer did, in a line. */
   lastAnswer?: string;
+  /** Departments the player has accepted will run out today. */
+  letRunOut?: DeptId[];
 }
 
 export interface StepSnapshot {

@@ -6,6 +6,7 @@ import { ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, FloorTask, StaffMember } from '../sim/types';
 import type { TaskPlace } from '../sim/config';
 import { DroppedBasket, poseFor, Shopper, StaffFigure } from './art/Characters';
+import { shopperFigures } from './shopperLayout';
 
 export type ZoneId = 'produce' | 'chilled' | 'ambient' | 'tills' | 'dock' | 'break';
 
@@ -133,6 +134,8 @@ interface Props {
 
 export interface StoreFloor {
   tasks: FloorTask[];
+  /** Each job's short label ("Can’t find tea bags · 3 min left"), by id. */
+  labels: Record<string, string>;
   /** A burst announced at the door. */
   door: { text: string; detail: string; arriving: boolean } | null;
 }
@@ -251,10 +254,6 @@ function fillWord(f: number): string {
   return 'OK';
 }
 
-function hash(a: number, b: number): number {
-  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
-  return x - Math.floor(x);
-}
 
 function StoreImpl(props: Props) {
   const { view, staff, assignments, activity, selected, onSelectStaff, onZone, context, onContext, interactive, animating, reducedMotion } = props;
@@ -434,7 +433,7 @@ function StoreImpl(props: Props) {
           ) : null,
         )}
       <QueueFigures open={openTills} queue={view.queue} />
-      <AisleShoppers view={view} motion={motion} />
+      <AisleShoppers view={view} motion={motion} depts={fit.depts} />
       <WalkOuts view={view} motion={motion} />
 
       {selected &&
@@ -894,40 +893,24 @@ function QueueFigures({ open, queue }: { open: number; queue: number }) {
   );
 }
 
-const DEPT_SPOTS: Record<DeptId, { x: [number, number]; y: [number, number] }> = {
-  produce: { x: [40, 260], y: [244, 432] },
-  chilled: { x: [340, 960], y: [256, 268] },
-  ambient: { x: [380, 930], y: [334, 392] },
-};
-
-/** Shoppers arriving this step, spread across departments by basket share. */
-function AisleShoppers({ view, motion }: { view: StoreView; motion: boolean }) {
-  const n = Math.min(14, Math.round(view.arrivals / 1.2));
-  if (n <= 0) return null;
-  const weights = DEPTS.map((d) => CONFIG.departments[d].basket);
-  const sum = weights.reduce((t, x) => t + x, 0);
-  const out: ReactNode[] = [];
-  let k = 0;
-  DEPTS.forEach((d, di) => {
-    const m = di === DEPTS.length - 1 ? n - k : Math.round((n * weights[di]) / sum);
-    const spot = DEPT_SPOTS[d];
-    for (let i = 0; i < m; i++, k++) {
-      const x = spot.x[0] + hash(k, 3) * (spot.x[1] - spot.x[0]);
-      const y = d === 'ambient' ? (k % 2 ? 336 : 390) : spot.y[0] + hash(k, 5) * (spot.y[1] - spot.y[0]);
-      const empty = view.emptyDepts.includes(d);
-      out.push(
+/** Shoppers browsing the departments the shop has (positions from `shopperFigures`). */
+function AisleShoppers({ view, motion, depts }: { view: StoreView; motion: boolean; depts: DeptId[] }) {
+  const figs = shopperFigures(view.arrivals, depts, view.emptyDepts);
+  if (!figs.length) return null;
+  return (
+    <g aria-hidden="true">
+      {figs.map(({ k, x, y, fill }) => (
         <g key={`${view.tick}-${k}`} transform={`translate(${x} ${y})`}>
           <g
             className={motion ? 'walk-in' : ''}
             style={{ ['--sx' as string]: `${ENTRANCE[0] - x}px`, ['--sy' as string]: `${ENTRANCE[1] - y}px`, animationDelay: `${(k % 7) * 70}ms` }}
           >
-            <Shopper n={k + 3} fill={empty ? 0.1 : 0.4 + hash(k, 9) * 0.5} puzzled={empty} />
+            <Shopper n={k + 3} fill={fill} />
           </g>
-        </g>,
-      );
-    }
-  });
-  return <g aria-hidden="true">{out}</g>;
+        </g>
+      ))}
+    </g>
+  );
 }
 
 function WalkOuts({ view, motion }: { view: StoreView; motion: boolean }) {
@@ -1089,6 +1072,8 @@ function FloorLayer({
         const open = t.assigned === null;
         const act = () => interactive && onTask?.(t.id, selected);
         const done = Math.min(1, t.progress / t.work);
+        const label = floor.labels[t.id] ?? k.short;
+        const pillW = Math.max(60, label.length * 5.6 + 14);
         return (
           <g
             key={t.id}
@@ -1096,7 +1081,7 @@ function FloorLayer({
             transform={`translate(${x} ${y})`}
             role={interactive ? 'button' : undefined}
             tabIndex={interactive ? 0 : undefined}
-            aria-label={`${k.label}${open ? `: needs someone for ${k.work} minute${k.work === 1 ? '' : 's'}` : ', being sorted'}.${selected && open ? ' Send the selected person.' : ''}`}
+            aria-label={`${label}.${open ? ` Needs one person for about ${k.work} minute${k.work === 1 ? '' : 's'}.` : ''}${selected && open ? ' Send the selected person here.' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               act();
@@ -1108,9 +1093,16 @@ function FloorLayer({
               }
             }}
           >
-            <title>{k.label}</title>
-            <circle r="24" fill="transparent" />
-            {target === t.id && <circle r="26" fill="rgba(227,178,60,0.3)" stroke="var(--mustard)" strokeWidth="3" />}
+            <title>{label}</title>
+            <circle r="26" fill="transparent" />
+            {/* While someone is being moved, open jobs are highlighted as places they can go, like the zones. */}
+            {selected && open && interactive && <circle r="30" className="task-armed" />}
+            {target === t.id && <circle r="30" fill="rgba(227,178,60,0.35)" stroke="var(--mustard)" strokeWidth="4" />}
+            {t.kind === 'help' && (
+              <g transform="translate(-30 22) scale(0.9)" aria-hidden="true">
+                <Shopper n={Number(t.id.replace(/\D/g, '')) + 5} fill={0.2} />
+              </g>
+            )}
             <circle r="13" fill={open ? 'var(--bad)' : 'var(--paper)'} stroke={open ? '#7a1f1a' : 'var(--good)'} strokeWidth="2" className={open && motion ? 'task-bob' : ''} />
             {open ? (
               <text y="5" textAnchor="middle" fontSize="16" fontWeight="900" fill="#fff">
@@ -1119,10 +1111,10 @@ function FloorLayer({
             ) : (
               <path d={arc(done)} fill="var(--good)" />
             )}
-            <g transform="translate(0 20)">
-              <rect x="-34" y="0" width="68" height="15" rx="7" fill="var(--paper)" stroke={open ? 'var(--bad)' : 'var(--line-strong)'} />
-              <text y="11" textAnchor="middle" fontSize="9.5" fontWeight="800" fill="var(--ink)">
-                {k.short}
+            <g transform={`translate(${t.kind === 'help' ? 8 : 0} ${t.kind === 'help' ? -36 : 20})`}>
+              <rect x={-pillW / 2} y="0" width={pillW} height="17" rx="8" fill={open ? 'var(--paper)' : '#e9f2e7'} stroke={open ? 'var(--bad)' : 'var(--good)'} strokeWidth="1.5" />
+              <text y="12" textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--ink)">
+                {label}
               </text>
             </g>
           </g>

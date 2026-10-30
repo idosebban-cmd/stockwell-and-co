@@ -3879,3 +3879,9 @@ ul.tannoy {
   border-radius: 6px;
   pointer-events: none;
 }
+.task-armed {
+  fill: rgba(217, 165, 33, 0.14);
+  stroke: var(--mustard);
+  stroke-width: 3;
+  stroke-dasharray: 8 5;
+}

@@ -110,7 +110,7 @@ export function Help({ onClose }: { onClose: () => void }) {
         <h3>In the shop</h3>
         <ul>
           <li>“!” needs attention (red: urgent). “Low” or “Empty” beside a department: few items on the shelf.</li>
-          <li>“z” above someone: tired, working slower. “…”: nothing to do. “?” above a shopper: can’t find what they want.</li>
+          <li>“z” above someone: tired, working slower. “…”: nothing to do. A red “!” on the floor: a floor job (a shopper waiting for help stands beside it).</li>
           <li>Counts and energy show when you select a place or a person.</li>
         </ul>
         <h3>Keyboard</h3>

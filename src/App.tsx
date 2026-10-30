@@ -22,7 +22,7 @@ import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
 import { unlockAudio } from './ui/sound';
 import { EventDialog } from './ui/EventDialog';
 import type { StoreFloor } from './ui/Store';
-import { BURST_TEXT, burstAtDoor } from './sim/floor';
+import { BURST_TEXT, burstAtDoor, taskText } from './sim/floor';
 import { stepOf } from './sim/live';
 import type { SimState } from './sim/types';
 import type { Game } from './ui/useGame';
@@ -263,8 +263,11 @@ function LiveScreen({ day, state, reduced }: { day: LiveDay; state: SimState; re
 /** Floor jobs and the cue at the door, for the shop drawing. */
 function storeFloor(state: SimState): StoreFloor {
   const door = burstAtDoor(state.floor, stepOf(state));
+  const now = stepOf(state);
+  const tasks = state.floor?.tasks ?? [];
   return {
-    tasks: state.floor?.tasks ?? [],
+    tasks,
+    labels: Object.fromEntries(tasks.map((t) => [t.id, taskText(t, now, state.staff.find((s) => s.id === t.assigned)?.name)])),
     door: door
       ? door.inMinutes > 0
         ? { text: BURST_TEXT[door.burst.kind].cue, detail: `About ${door.burst.shoppers} shoppers in ${door.inMinutes} min: open another till?`, arriving: false }

@@ -32,7 +32,7 @@ export function promptsNow(state: SimState): { key: string; kind: PromptKind }[]
   const now = stepOf(state);
   const door = burstAtDoor(state.floor, now);
   if (door) out.push({ key: door.burst.id, kind: 'burst' });
-  for (const t of state.floor?.tasks ?? []) out.push({ key: t.id, kind: 'task' });
+  for (const t of state.floor?.tasks ?? []) if (t.kind !== 'errand') out.push({ key: t.id, kind: 'task' });
   if (state.floor?.pending) out.push({ key: state.floor.pending.id, kind: 'event' });
   for (const d of DEPTS) {
     if (!state.ctx.depts.includes(d)) continue;
@@ -50,7 +50,7 @@ export function jobsWanted(state: SimState): number {
   let n = Math.min(state.ctx.tills, tills + (burstAtDoor(state.floor, stepOf(state)) ? 1 : 0));
   for (const d of DEPTS) if (state.ctx.depts.includes(d) && deptUnits(state, d).shelf < state.ctx.shelfCap[d] * 0.7 && deptUnits(state, d).backroom > 0) n += 1;
   if (DEPTS.some((d) => deptUnits(state, d).dock > 0)) n += 1;
-  n += state.floor?.tasks.length ?? 0;
+  n += state.floor?.tasks.filter((t) => t.kind !== 'errand').length ?? 0;
   n += onShift(state).filter((s) => s.energy < CONFIG.staff.tiredBelow).length > 0 ? 1 : 0;
   return n;
 }

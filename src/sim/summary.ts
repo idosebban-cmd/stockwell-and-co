@@ -326,16 +326,16 @@ function missedOpportunities(state: SimState, reports: HourReport[]): string[] {
     });
   }
 
-  // Running out entirely: an emergency order is only suggested if one could have arrived before closing.
+  // Running out entirely: a rush delivery is only suggested if one ordered in the hour before could have arrived before closing.
   for (const d of DEPTS) {
     const lost = reports.reduce((t, r) => t + r.dept[d].lostNoStock, 0);
     if (lost < 15) continue;
     const first = reports.find((r) => r.dept[d].lostNoStock > 1);
-    const orderAt = (first?.hour ?? 0) - CONFIG.actions.emergency.delayHours;
-    const couldHave = allowed('emergency') && state.used.emergency < CONFIG.actions.emergency.maxPerDay && orderAt >= 0 && orderAt + CONFIG.actions.emergency.delayHours < H;
+    const orderAt = (first?.hour ?? 0) - 1;
+    const couldHave = allowed('emergency') && state.used.emergency < CONFIG.actions.emergency.maxPerDay && orderAt >= 0 && orderAt + 1 < H;
     out.push({
       score: lost * CONFIG.departments[d].standardPrice,
-      text: `${deptName(d)} ran out from about ${hourLabel(first?.hour ?? 0)}, with roughly ${Math.round(lost)} items wanted.${couldHave ? ` An emergency order at ${hourLabel(orderAt)} would have arrived at ${hourLabel(orderAt + CONFIG.actions.emergency.delayHours)}.` : ''}`,
+      text: `${deptName(d)} ran out from about ${hourLabel(first?.hour ?? 0)}, with roughly ${Math.round(lost)} items wanted.${couldHave ? ` A rush delivery during the ${hourLabel(orderAt)} hour (on the dock in ${CONFIG.actions.emergency.arrivalMinutes} minutes) would have covered it.` : ''}`,
     });
   }
 

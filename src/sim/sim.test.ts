@@ -302,34 +302,34 @@ describe('expiry and perishables', () => {
 });
 
 describe('delayed arrivals', () => {
-  it('emergency orders arrive on the dock after the stated delay, not before', () => {
+  it('rush deliveries reach the dock after the stated minutes, not before', async () => {
+    const { runSteps } = await import('./engine');
     let state = startDay(SEED, recommendedSetup());
     const plan = sensible(state);
+    const mins = CONFIG.actions.emergency.arrivalMinutes;
     plan.actions = [{ kind: 'emergency', dept: 'ambient' }];
     const info = describeAction(state, plan.actions[0]);
     expect(info.available).toBe(true);
-    expect(info.timing).toMatch(/10:00/);
-    const r = runHour(state, plan);
-    state = r.state;
-    expect(r.report.dept.ambient.received).toBe(0);
-    // Now (10:00) it is on the dock.
-    expect(total(state.stock.ambient.dock)).toBeCloseTo(CONFIG.actions.emergency.qty);
-    // Duplicate while pending is blocked; so is the day limit.
-    expect(describeAction(state, { kind: 'emergency', dept: 'ambient' }).available).toBe(true); // previous already arrived
+    expect(info.timing).toMatch(new RegExp(`09:${mins}`));
+    const dock0 = total(state.stock.ambient.dock);
+    state = runSteps(state, plan, mins).state;
+    expect(total(state.stock.ambient.dock)).toBe(dock0);
+    const rest = { ...plan, actions: [], assignments: Object.fromEntries(Object.entries(plan.assignments).map(([id, a]) => [id, a === 'receive' ? 'tills' : a])) } as typeof plan;
+    state = runSteps(state, fixLimits(state, rest), 1).state;
+    expect(total(state.stock.ambient.dock)).toBeCloseTo(dock0 + CONFIG.actions.emergency.qty);
+    // One on its way for a department blocks another for it until it has arrived.
+    expect(describeAction(state, { kind: 'emergency', dept: 'ambient' }).available).toBe(true);
   });
-  it('blocks duplicate and after-close orders', () => {
+  it('blocks duplicate and after-close rush deliveries', async () => {
+    const { runSteps } = await import('./engine');
     let state = startDay(SEED, recommendedSetup());
     const a = { kind: 'emergency' as const, dept: 'chilled' as const };
     expect(describeAction(state, a, [a]).available).toBe(false);
-    const plan = sensible(state);
-    plan.actions = [a];
-    state = runHour(state, plan).state;
-    // Arrived at 10:00 — so pending duplicates are now about the day cap.
     for (let h = state.hour; h < 7; h++) state = runHour(state, sensible(state)).state;
-    expect(state.hour).toBe(7);
+    state = runSteps(state, sensible(state), 50).state;
     const late = describeAction(state, { kind: 'emergency', dept: 'produce' });
     expect(late.available).toBe(false);
-    expect(late.reason).toMatch(/after closing|runs a day/);
+    expect(late.reason).toMatch(/after closing/);
   });
   it('the agency temp starts the hour after booking and cannot be booked twice', () => {
     let state = startDay(SEED, recommendedSetup());

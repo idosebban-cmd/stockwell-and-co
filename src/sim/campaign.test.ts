@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG, DEPTS } from './config';
-import { checkSetup, defaultPlan, inventoryValue, planErrors, runHour, weekdayName } from './engine';
+import { checkSetup, defaultPlan, deptUnits, inventoryValue, planErrors, runHour, weekdayName } from './engine';
 import {
   allOffers,
   buy,
@@ -26,7 +26,7 @@ import {
   type CampaignRecord,
   type CampaignState,
 } from './campaign';
-import { noReplenishment, planInvest, playCampaign, sensible, type Strategy } from './bots';
+import { noReplenishment, planInvest, playCampaign, playLiveDay, sensible, type Strategy } from './bots';
 import * as S from './stock';
 import type { SimState } from './types';
 
@@ -203,6 +203,34 @@ describe('purchases', () => {
 });
 
 describe('recommended orders', () => {
+  it('cover the forecast plus a margin for bursts (at least 20% over), unless space or cash runs out first', () => {
+    const c = newCampaign(1);
+    const o = recommendOrder(c);
+    const ctx = dayContext(c);
+    const have = carriedQty(c);
+    const forecast = dayScenario(c).forecast.reduce((t, x) => t + x, 0);
+    for (const d of ctx.depts) {
+      const stock = have[d] + o.orders[d].morning + o.orders[d].midday;
+      const space = ctx.shelfCap[d] + ctx.backroomCap[d];
+      expect(Math.min(stock + 10, space)).toBeGreaterThanOrEqual(Math.min(space, forecast * CONFIG.departments[d].basket * ctx.range[d] * 1.2));
+    }
+  });
+  it('accepting them never runs a department out of stock, from the first Sunday through the week (bursts included)', () => {
+    for (const seed of [1, 2, 3]) {
+      let c = newCampaign(seed);
+      for (let d = 0; d < WEEK_DAYS; d++) {
+        const ranOut: string[] = [];
+        const state = playLiveDay(startCampaignDay(c, recommendOrder(c)), sensible, (l) => {
+          for (const dp of l.state.ctx.depts) {
+            const u = deptUnits(l.state, dp);
+            if (u.shelf + u.backroom + u.dock + u.pending < 1) ranOut.push(`${weekdayName(d)} ${dp} at ${l.state.hour}:${l.state.step}`);
+          }
+        });
+        expect(ranOut).toEqual([]);
+        c = finishDay(c, state).camp;
+      }
+    }
+  });
   it('stay within the funds and the space, and adapt to stock already in the shop', () => {
     let c = newCampaign(1);
     for (let i = 0; i < WEEK_DAYS; i++) {

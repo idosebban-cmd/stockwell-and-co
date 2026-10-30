@@ -183,7 +183,7 @@ const SKINS = ['#f1c7a5', '#d9a27c', '#a8724a', '#6b4428', '#e8b48f', '#c48b62']
 const HAIRS = ['#2b1d14', '#6b4a2f', '#c9c4bc', '#b9551f', '#16100c', '#d8b25a'];
 
 /** A shopper with a basket. `fill` is how full the basket looks (0..1). */
-export function Shopper({ n, fill = 0.6, puzzled = false, leaving = false }: { n: number; fill?: number; puzzled?: boolean; leaving?: boolean }) {
+export function Shopper({ n, fill = 0.6, leaving = false }: { n: number; fill?: number; leaving?: boolean }) {
   const coat = COATS[n % COATS.length];
   const skin = SKINS[(n * 7) % SKINS.length];
   const hair = HAIRS[(n * 5) % HAIRS.length];
@@ -205,14 +205,6 @@ export function Shopper({ n, fill = 0.6, puzzled = false, leaving = false }: { n
           {items > 2 && <rect x="5.8" y="-1" width="2" height="2" fill="#5d8f2f" />}
           <rect x="0" y="0" width="9" height="6" rx="1" fill="var(--burgundy)" opacity="0.9" />
           <path d="M1.5 1.5 h6 M1.5 3.5 h6" stroke="var(--paper)" strokeWidth="0.5" />
-        </g>
-      )}
-      {puzzled && (
-        <g className="bubble">
-          <circle cx="7" cy="-36" r="5.5" fill="var(--paper)" stroke="var(--bad)" strokeWidth="1" />
-          <text x="7" y="-33.4" textAnchor="middle" fontSize="8" fontWeight="800" fill="var(--bad)">
-            ?
-          </text>
         </g>
       )}
       {leaving && (

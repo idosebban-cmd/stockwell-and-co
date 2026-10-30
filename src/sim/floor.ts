@@ -59,7 +59,7 @@ export function makeFloor(seed: number, ctx: DayContext, forecast: readonly numb
 
   // Floor jobs: a Poisson-like stream per minute, busier when the forecast is.
   const T = F.tasks;
-  const kinds = TASK_KINDS.filter((k) => T.kinds[k].where.some((w) => placeExists(w, ctx)));
+  const kinds = TASK_KINDS.filter((k) => T.kinds[k].weight > 0 && T.kinds[k].where.some((w) => placeExists(w, ctx)));
   const weightSum = kinds.reduce((t, k) => t + T.kinds[k].weight, 0);
   let lastTask = -Infinity;
   let n = 0;
@@ -117,7 +117,7 @@ export function burstAtDoor(floor: Floor | undefined, abs: number): { burst: Bur
 /** New jobs appear, and unattended ones that have run their time go away. Called at the start of each step. */
 export function spawnAndExpire(floor: Floor, abs: number, messages: string[]): void {
   while (floor.schedule.length && floor.schedule[0].at <= abs) {
-    if (floor.tasks.length >= F.tasks.maxOpen) {
+    if (floor.tasks.filter((t) => t.kind !== 'errand').length >= F.tasks.maxOpen) {
       // The floor is busy enough: this one comes a little later.
       for (const t of floor.schedule) if (t.at <= abs) t.at = abs + 1;
       break;
@@ -145,4 +145,33 @@ export function floorMood(floor: Floor | undefined, abs: number, penaltyScale: n
 
 export function taskLabel(t: FloorTask): string {
   return F.tasks.kinds[t.kind].label;
+}
+
+/** What a shopper needing help is looking for (fixed per job). */
+export function helpItem(t: FloorTask): string {
+  const items = t.place === 'produce' || t.place === 'chilled' || t.place === 'ambient' ? F.tasks.helpItems[t.place] : F.tasks.helpItems.ambient;
+  const n = Number(t.id.replace(/\D/g, '')) || 0;
+  return items[n % items.length];
+}
+
+/**
+ * A job's short label for the shop and Needs attention: what it is and the
+ * time that matters (until the shopper gives up, or the work it takes; once
+ * someone is on it, who and how long to go).
+ */
+export function taskText(t: FloorTask, now: number, worker?: string): string {
+  const what =
+    t.kind === 'help'
+      ? `Can’t find ${helpItem(t)}`
+      : t.kind === 'spill'
+        ? 'Spill to mop'
+        : t.kind === 'priceCheck'
+          ? 'Price check'
+          : t.kind === 'pallet'
+            ? 'Cage blocking aisle'
+            : 'Baskets running out';
+  if (t.kind === 'errand') return `${worker ?? 'Someone'} at the cash-and-carry · back in ${Math.max(1, Math.ceil(t.work - t.progress))} min`;
+  if (t.assigned) return `${worker ?? 'Someone'} on it · ${Math.max(1, Math.ceil(t.work - t.progress))} min to go`;
+  if (t.expiresAt !== null) return `${what} · ${Math.max(1, t.expiresAt - now)} min left`;
+  return `${what} · ${t.work} min job`;
 }

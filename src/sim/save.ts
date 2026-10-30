@@ -4,7 +4,7 @@
  */
 import { DEPTS, PRICE_TIERS } from './config';
 import { convertRecordV3, rebuild, RECORD_VERSION, type GameRecord } from './game';
-import { CAMPAIGN_VERSION, convertCampaignV1, replayToday, type CampaignRecord } from './campaign';
+import { CAMPAIGN_VERSION, convertCampaignV1, newCampaign, replayToday, type CampaignRecord } from './campaign';
 import type { Choice } from './live';
 import { ASSIGNMENTS, type HourPlan, type SetupPlan } from './types';
 
@@ -222,6 +222,8 @@ export function loadCampaign(storage: StorageLike | null): CampaignLoad {
     const record = r as unknown as CampaignRecord;
     if (record.version !== CAMPAIGN_VERSION || !record.camp || typeof record.camp.day !== 'number' || !Array.isArray(record.purchases)) return { file: null, problem: reset };
     if (record.today && (!isSetup(record.today.setup) || !Array.isArray(record.today.choices) || !record.today.choices.every(isChoice) || typeof record.today.minute !== 'number')) return { file: null, problem: reset };
+    // A first morning that hasn't been opened yet starts from today's starting stock (it may have been saved under older rules).
+    if (record.camp.day === 0 && !record.today) record.camp = newCampaign(record.seed);
     replayToday(record);
     return { file: { record, savedAt: String(data.savedAt ?? '') }, problem: null };
   } catch {

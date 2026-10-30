@@ -61,7 +61,7 @@ The build is static (`dist/`, relative paths) and can be opened from any static 
 - **Customers and queues.** Shoppers pick from the shelves and join the queue. When the expected wait exceeds their patience, a share leave each minute; their baskets go back on the shelves (some chilled is binned).
 - **Money.** Stock purchases spend cash and create inventory. A sale recognises revenue and the cost of the goods sold; waste writes off the cost of what expired. Unsold stock keeps its value at cost. Tests check that no item or pound is created, lost or counted twice.
 - **Staff.** Energy falls while working and recovers on a break. Below 50, people slow down. Wellbeing is based on strain accumulated across the shift, so resting everyone at the end does not undo the day.
-- **Actions** happen at once (live) and are limited, previewed with cost, timing and effect.
+- **Actions** happen at once (live) and are limited, previewed with cost, timing and effect. When stock runs low there are real choices from day one: a **rush delivery** (120 items at 1.5× cost plus £25, on the dock to unload about 20 minutes later, two a day), a **cash-and-carry run** (send someone away for 30 minutes; they come back with 60 items at 1.25× cost, straight into the stockroom; two a day), raising the price once prices are unlocked, or letting it run out.
 - **Determinism and saves.** The seed fixes the demand variation and events. A live day is stored as its opening state plus the choices made, each stamped with its minute, and rebuilt exactly from them; autosave runs every few seconds, on pause and when the page is hidden.
 
 ## Life on the floor (pacing)
@@ -95,7 +95,7 @@ Prompts counted: a burst announced, a floor job appearing, a question, a shelf f
 - **Supplier credit (no death spiral).** The bank lets the morning order take cash to −£500. Beyond that, the wholesaler puts up to £300 of stock on account; 30% of takings goes to paying it off until it is cleared. What is owed counts against business value. So a shop with no cash can still buy a small order, sell it and recover.
 - **What carries over.** Cash and what is owed; stock with its date; installed equipment; staff and their carried fatigue; reputation; prices.
 - **Reputation** moves 40% of the way towards each day’s satisfaction and sets footfall gently (−12% to +12%).
-- **Orders.** The recommended order is the forecast at today’s prices, less stock in the shop, within the space, split between the morning and the midday lorry; it can use the overdraft and then the account, keeping one hour of costs back. Nothing is bought without confirming.
+- **Orders.** The recommended order is the forecast at today’s prices plus a margin for bursts and variation (`campaign.orderCover`: ×1.25 perishable, ×1.35 cupboard), less stock in the shop, within the space, split between the morning and the midday lorry; it can use the overdraft and then the account, keeping one hour of costs back. Nothing is bought without confirming.
 - **Improvements** (any order, none required):
 
   | Improvement | Cost | Running cost | Effect |
@@ -202,6 +202,7 @@ Assumptions most in need of playtesting:
 - Balance has been tuned with scripted strategies that decide once an hour, not with human players in real time.
 - Desktop-first. Dragging works with a mouse, pen or touch, but the layout isn’t designed for phones.
 - Learn to play and the pricing lessons still use the old hourly intervals and replay; phase 2 replaces them with contextual hints.
+- Browsing shoppers are decoration: they only appear in departments the shop has and never carry a marker. A shopper who needs something is a floor job with its own red “!” (`chilledLocked.test.ts` checks Sunday to Tuesday with chilled locked).
 
 ## Status
 

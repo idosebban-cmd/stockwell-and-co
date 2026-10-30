@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CONFIG, DEPTS, hourLabel } from '../sim/config';
-import { STEP_MINUTES, assignmentLimit, clockLabel, expectedCustomers, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
+import { STEP_MINUTES, assignmentLimit, clockLabel, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
 import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
 import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
+import { liveBrowsing } from './shopperLayout';
 import type { LessonFocus } from '../sim/tutorial';
 
 /** What the one contextual panel is showing. Opening something replaces what was there. */
@@ -440,7 +441,7 @@ function buildView(state: SimState, phase: 'plan' | 'replay' | 'results' | 'live
   });
   if (phase === 'live' && state.hour < state.ctx.hours) {
     // Shoppers browsing: about ten minutes' worth of arrivals, refreshed every ten minutes.
-    view.arrivals = expectedCustomers(state) / 6;
+    view.arrivals = liveBrowsing(state);
     view.tick = `${state.hour}-${Math.floor((state.step ?? 0) / 10)}`;
   }
   if (phase === 'results' && report) {

@@ -340,12 +340,12 @@ function prepareHour(state: SimState, waste: WasteLine[]): void {
   for (const d of DEPTS) expire(state, d, h, waste, notes);
   // Deliveries reaching the dock.
   let arrived = 0;
-  for (const del of state.deliveries.filter((x) => x.arrivesAt === h)) {
+  for (const del of state.deliveries.filter((x) => x.arrivesAt === h && x.arrivesAtStep === undefined)) {
     S.add(state.stock[del.dept].dock, datedBatches(del.dept, del.qty, del.unitCost, del.life, state.ctx.weekday));
     arrived += del.qty;
   }
   if (arrived > 0) notes.push(`Delivery on the dock: ${Math.round(arrived)} items to receive.`);
-  state.deliveries = state.deliveries.filter((x) => x.arrivesAt !== h);
+  state.deliveries = state.deliveries.filter((x) => x.arrivesAt !== h || x.arrivesAtStep !== undefined);
   for (const s of state.staff) {
     if (s.isTemp && s.availableFrom === h) notes.push(`The agency temp has arrived and is asking where the toilets are.`);
   }
@@ -526,6 +526,7 @@ export interface ActionInfo {
 }
 
 export function actionKey(a: ActionRequest): string {
+  if (a.kind === 'cashAndCarry') return `${a.kind}:${a.dept}:${a.staffId}`;
   return 'dept' in a ? `${a.kind}:${a.dept}` : a.kind;
 }
 
@@ -541,6 +542,10 @@ export function actionCost(a: ActionRequest): number {
       return C.actions.temp.bookingFee;
     case 'repair':
       return C.actions.repair.cost;
+    case 'cashAndCarry':
+      return C.actions.cashAndCarry.qty * C.departments[a.dept].unitCost * C.actions.cashAndCarry.costMult;
+    case 'letRunOut':
+      return 0;
   }
 }
 
@@ -580,12 +585,34 @@ export function describeAction(state: SimState, a: ActionRequest, alreadyPlanned
     }
     case 'emergency': {
       const cfg = C.departments[a.dept];
-      title = `Emergency order: ${deptName(a.dept).toLowerCase()}`;
-      timing = `Arrives on the dock at ${hourLabel(h + A.emergency.delayHours)}. Someone must receive it.`;
+      const now = h * STEPS + (state.step ?? 0);
+      const at = now + Math.round(A.emergency.arrivalMinutes / STEP_MINUTES);
+      title = `Rush delivery: ${deptName(a.dept).toLowerCase()}`;
+      timing = `On the dock in about ${A.emergency.arrivalMinutes} minutes (${clockLabel(Math.floor(at / STEPS), at % STEPS)}). Someone must unload it.`;
       effect = `${A.emergency.qty} items at ${money(cfg.unitCost * A.emergency.costMult)} each (normally ${money(cfg.unitCost)}) plus a ${money(A.emergency.deliveryFee)} delivery fee.${a.dept === 'chilled' ? ' Longer-life dates.' : ''}`;
-      if (state.used.emergency >= A.emergency.maxPerDay) reason = `The cash-and-carry van only does ${A.emergency.maxPerDay} runs a day.`;
-      else if (state.deliveries.some((x) => x.kind === 'emergency' && x.dept === a.dept)) reason = 'An emergency order for this department is already on its way.';
-      else if (h + A.emergency.delayHours >= state.ctx.hours) reason = 'It would arrive after closing.';
+      if (state.used.emergency >= A.emergency.maxPerDay) reason = `The wholesaler only does ${A.emergency.maxPerDay} rush deliveries a day.`;
+      else if (state.deliveries.some((x) => x.kind === 'emergency' && x.dept === a.dept)) reason = 'A rush delivery for this department is already on its way.';
+      else if (at >= state.ctx.hours * STEPS - 5) reason = 'It would arrive after closing.';
+      break;
+    }
+    case 'cashAndCarry': {
+      const cc = A.cashAndCarry;
+      const who = state.staff.find((s) => s.id === a.staffId);
+      const now = h * STEPS + (state.step ?? 0);
+      title = `Send ${who?.name ?? 'someone'} to the cash-and-carry`;
+      timing = `${who?.name ?? 'They'} will be away about ${cc.minutes} minutes, then back to their job.`;
+      effect = `${cc.qty} ${deptName(a.dept).toLowerCase()} items at ${money(C.departments[a.dept].unitCost * cc.costMult)} each, straight into the stockroom (no unloading).`;
+      if (!who || who.availableFrom > h) reason = 'Not on shift.';
+      else if ((state.used.cashAndCarry ?? 0) >= cc.maxPerDay) reason = `Only ${cc.maxPerDay} runs a day: the car needs to go home too.`;
+      else if (state.floor?.tasks.some((t) => t.kind === 'errand')) reason = 'Someone is already out at the cash-and-carry.';
+      else if (now + Math.round(cc.minutes / STEP_MINUTES) >= state.ctx.hours * STEPS - 5) reason = 'They would be back after closing.';
+      break;
+    }
+    case 'letRunOut': {
+      title = `Let ${deptName(a.dept).toLowerCase()} run out`;
+      timing = 'For the rest of today.';
+      effect = 'No more warnings about it. Shoppers who can’t find it will be a little less happy.';
+      if (state.floor?.letRunOut?.includes(a.dept)) reason = 'Already accepted.';
       break;
     }
     case 'temp': {
@@ -694,18 +721,34 @@ function applyActions(state: SimState, actions: ActionRequest[]): void {
         state.ledger.stockPurchases += stockCost;
         addExtra(state, 'Emergency delivery fees', A.emergency.deliveryFee);
         state.used.emergency += 1;
+        const at = h * STEPS + (state.step ?? 0) + Math.round(A.emergency.arrivalMinutes / STEP_MINUTES);
         state.deliveries.push({
           id: `emergency-${a.dept}-${state.idCounter++}`,
           dept: a.dept,
           qty: A.emergency.qty,
           unitCost: unit,
-          arrivesAt: h + A.emergency.delayHours,
+          arrivesAt: Math.floor(at / STEPS),
+          arrivesAtStep: at,
           kind: 'emergency',
           life: a.dept === 'chilled' ? 'long' : undefined,
-          originalHour: h + A.emergency.delayHours,
+          originalHour: Math.floor(at / STEPS),
         });
         break;
       }
+      case 'cashAndCarry': {
+        // Paid now; the stock comes back with them. The live layer sends the person.
+        const cc = A.cashAndCarry;
+        const unit = C.departments[a.dept].unitCost * cc.costMult;
+        state.cash -= cc.qty * unit;
+        state.ledger.stockPurchases += cc.qty * unit;
+        state.used.cashAndCarry = (state.used.cashAndCarry ?? 0) + 1;
+        const now = h * STEPS + (state.step ?? 0);
+        state.floor?.tasks.push({ id: `errand-${state.idCounter++}`, kind: 'errand', place: 'entrance', spot: 0, at: now, work: cc.minutes, progress: 0, assigned: a.staffId, expiresAt: null, brings: { dept: a.dept, qty: cc.qty, unitCost: unit } });
+        break;
+      }
+      case 'letRunOut':
+        if (state.floor) state.floor.letRunOut = [...(state.floor.letRunOut ?? []), a.dept];
+        break;
       case 'temp': {
         addExtra(state, 'Agency temp', A.temp.bookingFee);
         state.used.temp = true;
@@ -867,6 +910,12 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
 
     // Floor jobs appear (and unattended ones that have run their time go away).
     if (state.floor) spawnAndExpire(state.floor, abs, messages);
+    // Rush deliveries reach the dock at their minute.
+    for (const del of state.deliveries.filter((x) => x.arrivesAtStep !== undefined && x.arrivesAtStep <= abs)) {
+      S.add(state.stock[del.dept].dock, datedBatches(del.dept, del.qty, del.unitCost, del.life, state.ctx.weekday));
+      messages.push(`Rush delivery on the dock: ${Math.round(del.qty)} ${deptName(del.dept).toLowerCase()} items to unload.`);
+    }
+    state.deliveries = state.deliveries.filter((x) => x.arrivesAtStep === undefined || x.arrivesAtStep > abs);
 
     // Capacities this minute, from each person's energy now.
     let tillCap = 0;
@@ -1056,11 +1105,19 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
         if (a === 'task' && state.floor) {
           const t = state.floor.tasks.find((x) => x.assigned === m.id);
           if (t) {
-            t.progress += productivity(m.energy) * (m.isTemp ? C.actions.temp.productivity : 1);
+            // A cash-and-carry run takes its minutes whoever goes; floor jobs go at the person's pace.
+            t.progress += t.kind === 'errand' ? 1 : productivity(m.energy) * (m.isTemp ? C.actions.temp.productivity : 1);
             if (t.progress >= t.work - 1e-9) {
               state.floor.tasks = state.floor.tasks.filter((x) => x !== t);
-              state.floor.counts.resolved += 1;
-              messages.push(`${m.name} sorted it: ${C.floor.tasks.kinds[t.kind].short.toLowerCase()} done.`);
+              if (t.brings) {
+                const b = t.brings;
+                const days = b.dept === 'chilled' ? C.chilledLife.long.days : C.shelfLife[b.dept];
+                S.add(state.stock[b.dept].backroom, [{ qty: b.qty, unitCost: b.unitCost, expiresAt: days === null ? null : useByExpiry(days), label: days === null ? C.shelfLabels[b.dept] : `Use by ${weekdayName(state.ctx.weekday + days)}` }]);
+                messages.push(`${m.name} is back from the cash-and-carry with ${b.qty} ${deptName(b.dept).toLowerCase()} items.`);
+              } else {
+                state.floor.counts.resolved += 1;
+                messages.push(`${m.name} sorted it: ${C.floor.tasks.kinds[t.kind].short.toLowerCase()} done.`);
+              }
             }
           }
         }

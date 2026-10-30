@@ -320,7 +320,7 @@ export function recommendOrder(camp: CampaignState): SetupPlan {
     const per = C.departments[d].basket * ctx.range[d] * tierDemand(d, pricing[d]) * tripMultiplier(pricing, d);
     const upTo = (h: number) => sc.forecast.slice(0, h).reduce((t, x) => t + x, 0) * per;
     // A margin for the day's bursts of shoppers, more for cupboard stock, which keeps.
-    const cover = d === 'ambient' ? 1.25 : 1.1;
+    const cover = d === 'ambient' ? K.orderCover.ambient : K.orderCover.perishable;
     const total = upTo(ctx.hours) * cover;
     const space = Math.max(0, ctx.shelfCap[d] + ctx.backroomCap[d] - have[d]);
     const want = Math.max(0, total - have[d]);
