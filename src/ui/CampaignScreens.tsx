@@ -25,7 +25,7 @@ import {
 } from '../sim/campaign';
 import type { SetupPlan, SimState } from '../sim/types';
 import { ShopScreen } from './ShopScreen';
-import { Clock, CueArt, EquipArt, Person, ResultIcon, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
+import { Clock, CueArt, EquipArt, Lorry, Person, ResultIcon, Sunrise, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
 import { SPECIALITY_TEXT } from '../sim/roster';
 import type { ShopNotice, ZoneId } from './Store';
 
@@ -143,12 +143,21 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
                   <li key={d}>
                     <span className="ol-dept">{deptName(d)}</span>
                     <span className="ol-edit">
-                      <Qty label={`${deptName(d)} morning delivery`} value={order.orders[d].morning} onChange={(v) => set(d, 'morning', v)} />
+                      {/* orders.morning: put away by the night crew before opening. */}
+                      <span className="ol-delivery">
+                        <span className="ol-when">
+                          <Sunrise /> Before opening
+                        </span>
+                        <Qty label={`${deptName(d)}: before opening`} value={order.orders[d].morning} onChange={(v) => set(d, 'morning', v)} />
+                      </span>
+                      {/* orders.midday: reaches the dock at the day's midday hour; only on days that have one. */}
                       {ctx.middayHour !== null && (
-                        <>
-                          <span className="muted">{hourLabel(ctx.middayHour)}</span>
-                          <Qty label={`${deptName(d)} midday delivery`} value={order.orders[d].midday} onChange={(v) => set(d, 'midday', v)} />
-                        </>
+                        <span className="ol-delivery">
+                          <span className="ol-when">
+                            <Lorry /> Delivery at {hourLabel(ctx.middayHour)}
+                          </span>
+                          <Qty label={`${deptName(d)}: delivery at ${hourLabel(ctx.middayHour)}`} value={order.orders[d].midday} onChange={(v) => set(d, 'midday', v)} />
+                        </span>
                       )}
                     </span>
                     {d === 'chilled' && (

@@ -297,3 +297,29 @@ export function ResultIcon({ kind }: { kind: 'profit' | 'customers' | 'staff' | 
     </Svg>
   );
 }
+
+/** Opening stock: the sun coming up over the shop. */
+export function Sunrise() {
+  return (
+    <Svg w={28} h={20}>
+      <path d="M2 17 H26" stroke="var(--wood-dark)" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M7 17 A7 7 0 0 1 21 17 Z" fill="var(--mustard)" />
+      {[-60, -30, 0, 30, 60].map((a) => (
+        <path key={a} d="M14 7 V3" stroke="var(--mustard)" strokeWidth="1.6" strokeLinecap="round" transform={`rotate(${a} 14 17)`} />
+      ))}
+    </Svg>
+  );
+}
+
+/** The midday delivery lorry. */
+export function Lorry() {
+  return (
+    <Svg w={30} h={20}>
+      <rect x="2" y="4" width="17" height="11" rx="1.5" fill="var(--burgundy)" />
+      <path d="M19 7 h5 l3 4 v4 h-8z" fill="var(--burgundy-dark)" />
+      <rect x="21" y="8" width="3" height="3" fill="#cfe3ea" />
+      <circle cx="7" cy="16" r="2.4" fill="var(--ink)" />
+      <circle cx="23" cy="16" r="2.4" fill="var(--ink)" />
+    </Svg>
+  );
+}

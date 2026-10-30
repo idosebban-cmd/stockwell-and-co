@@ -3657,3 +3657,27 @@ ul.tannoy {
     flex-wrap: wrap;
   }
 }
+
+/* Order editor: each quantity under its own delivery label */
+.order-edit .ol-edit {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+.ol-delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ol-when {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.order-edit .qty-row.small input {
+  width: 58px;
+}
