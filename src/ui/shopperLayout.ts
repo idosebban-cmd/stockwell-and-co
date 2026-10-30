@@ -9,13 +9,13 @@ import type { SimState } from '../sim/types';
 
 /** Browsing spots per department (viewBox units). */
 export const DEPT_SPOTS: Record<DeptId, { x: [number, number]; y: [number, number] }> = {
-  produce: { x: [40, 260], y: [244, 432] },
-  chilled: { x: [340, 960], y: [256, 268] },
-  ambient: { x: [380, 930], y: [334, 392] },
+  produce: { x: [40, 260], y: [414, 452] },
+  chilled: { x: [340, 960], y: [290, 300] },
+  ambient: { x: [390, 820], y: [378, 448] },
 };
 
 /** The strip where the chilled cabinets stand once bought (the "Chilled food" zone). */
-export const CHILLED_AREA = { x: 300, y: 156, w: 688, h: 114 };
+export const CHILLED_AREA = { x: 300, y: 160, w: 686, h: 110 };
 
 export function inChilledArea(x: number, y: number): boolean {
   return x >= CHILLED_AREA.x && x <= CHILLED_AREA.x + CHILLED_AREA.w && y >= CHILLED_AREA.y && y <= CHILLED_AREA.y + CHILLED_AREA.h;
@@ -40,8 +40,8 @@ export function liveBrowsing(state: SimState): number {
   return state.hour < state.ctx.hours ? expectedCustomers(state) / 6 : 0;
 }
 
-/** One figure per 1.2 arrivals (up to 14), spread across the shop's departments by basket share. */
-export function shopperFigures(arrivals: number, depts: readonly DeptId[], emptyDepts: readonly DeptId[]): ShopperFigure[] {
+/** One figure per 1.2 arrivals (up to 14), spread across the shop's departments by basket share. Grocery shoppers stand on the aisle walks (the feet line in front of each gondola). */
+export function shopperFigures(arrivals: number, depts: readonly DeptId[], emptyDepts: readonly DeptId[], aisleWalks: readonly number[] = DEPT_SPOTS.ambient.y): ShopperFigure[] {
   const n = Math.min(14, Math.round(arrivals / 1.2));
   if (n <= 0 || !depts.length) return [];
   const weights = depts.map((d) => CONFIG.departments[d].basket);
@@ -53,7 +53,7 @@ export function shopperFigures(arrivals: number, depts: readonly DeptId[], empty
     const spot = DEPT_SPOTS[d];
     for (let i = 0; i < m; i++, k++) {
       const x = spot.x[0] + hash(k, 3) * (spot.x[1] - spot.x[0]);
-      const y = d === 'ambient' ? (k % 2 ? 336 : 390) : spot.y[0] + hash(k, 5) * (spot.y[1] - spot.y[0]);
+      const y = d === 'ambient' ? aisleWalks[k % aisleWalks.length] : spot.y[0] + hash(k, 5) * (spot.y[1] - spot.y[0]);
       out.push({ k, dept: d, x, y, fill: emptyDepts.includes(d) ? 0.1 : 0.4 + hash(k, 9) * 0.5 });
     }
   });
