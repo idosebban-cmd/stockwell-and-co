@@ -1,24 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CONFIG } from './sim/config';
-import { describeAction, recommendedSetup, teamSize, weekdayName } from './sim/engine';
-import { campaignPool, teamWellbeing, type CampaignState, type UpgradeId } from './sim/campaign';
-import { getStorage, loadMode, saveMode, type Mode } from './sim/save';
-import { CORE_LESSONS, LESSONS } from './sim/tutorial';
-import { QUICK_TARGETS } from './sim/summary';
-import { useGame } from './ui/useGame';
+import { describeAction, teamSize, weekdayName } from './sim/engine';
+import { campaignPool, type CampaignState, type UpgradeId } from './sim/campaign';
+import { getStorage, loadMode, saveMode } from './sim/save';
 import { useCampaign } from './ui/useCampaign';
+import { useSettings } from './ui/useSettings';
 import type { LiveDay } from './ui/useLiveDay';
 import { StatusBar, type CampaignStatus } from './ui/StatusBar';
 import { GamePanel } from './ui/PlanPanel';
 import { GameTools } from './ui/ActionTools';
-import { Setup } from './ui/Setup';
 import { Opening } from './ui/Opening';
 import { Closing } from './ui/Closing';
 import { ClockControls } from './ui/ClockControls';
 import { dayKicker, Investments, MorningScreen, ValueLines, ValueSummary } from './ui/CampaignScreens';
 import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
-import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
 import { unlockAudio } from './ui/sound';
 import { EventDialog } from './ui/EventDialog';
 import type { HiringProps } from './ui/Hiring';
@@ -26,20 +22,17 @@ import type { StoreFloor } from './ui/Store';
 import { BURST_TEXT, burstAtDoor, taskText } from './sim/floor';
 import { stepOf } from './sim/live';
 import type { SimState } from './sim/types';
-import type { Game } from './ui/useGame';
 
-type AppMode = Mode | 'tutorial';
+type AppMode = 'home' | 'campaign';
 
 export default function App() {
   const storage = useMemo(() => getStorage(), []);
-  const game = useGame();
-  const week = useCampaign(storage, game.settings.sound);
-  const tutorial = useTutorial(storage, false);
-  const [mode, setModeState] = useState<AppMode>(() => (tutorial.progress.active ? 'tutorial' : loadMode(storage)));
+  const { settings, setSettings } = useSettings();
+  const week = useCampaign(storage, settings.sound);
+  const [mode, setModeState] = useState<AppMode>(() => (loadMode(storage) === 'campaign' ? 'campaign' : 'home'));
   const [dialog, setDialog] = useState<null | 'help' | 'settings' | 'menu'>(null);
-  const reduced = game.settings.reducedMotion || prefersReducedMotion();
-  const quickInProgress = game.phase === 'trading' && game.record.minute > 0;
-  const activeDay: LiveDay | null = mode === 'campaign' && week.phase === 'trading' ? week.day : mode === 'quick' && game.phase === 'trading' ? game.day : null;
+  const reduced = settings.reducedMotion || prefersReducedMotion();
+  const activeDay: LiveDay | null = mode === 'campaign' && week.phase === 'trading' ? week.day : null;
 
   // Browsers only allow sound after a click or key press.
   useEffect(() => {
@@ -54,7 +47,7 @@ export default function App() {
 
   const setMode = (m: AppMode) => {
     setModeState(m);
-    if (m !== 'tutorial') saveMode(storage, m);
+    saveMode(storage, m);
     setDialog(null);
   };
   // Opening a dialog pauses the clock.
@@ -62,34 +55,13 @@ export default function App() {
     activeDay?.clock.setPaused(true);
     setDialog(d);
   };
-  const learn = () => {
-    tutorial.begin(0);
-    setMode('tutorial');
-  };
-  const exitTutorial = () => {
-    tutorial.exit();
-    setMode('home');
-  };
-  const startQuick = (custom = false) => {
-    if (custom) game.playCurated();
-    else if (game.phase !== 'trading') game.playCurated(recommendedSetup());
-    setMode('quick');
-  };
-  const fullSaturday = () => {
-    tutorial.exit();
-    setMode('campaign');
-  };
 
-  const t = tutorial;
-  const lessonLabel = t.lesson.optional
-    ? `Pricing ${t.index - CORE_LESSONS + 1} of ${LESSONS.length - CORE_LESSONS} · ${t.lesson.title}`
-    : `Lesson ${t.index + 1} of ${CORE_LESSONS} · ${t.lesson.title}`;
-  const sound = { on: game.settings.sound, toggle: () => game.setSettings({ sound: !game.settings.sound }) };
+  const sound = { on: settings.sound, toggle: () => setSettings({ sound: !settings.sound }) };
   const bar = (state: SimState | null, campaign?: CampaignStatus) => (
     <StatusBar
       state={state}
       campaign={campaign}
-      saveOk={mode === 'campaign' ? week.saveOk : game.saveOk}
+      saveOk={week.saveOk}
       onHelp={() => openDialog('help')}
       onSettings={() => openDialog('settings')}
       onMenu={() => openDialog('menu')}
@@ -101,19 +73,10 @@ export default function App() {
     mode === 'campaign'
       ? [
           ...(week.phase !== 'morning' ? [{ label: `Restart ${weekdayName(week.camp.day)}`, onClick: () => { week.restart(); setDialog(null); }, primary: true }] : []),
-          { label: 'Start again with a new shop', onClick: () => { week.newShop(); setDialog(null); } },
+          { label: 'New shop', onClick: () => { week.newShop(); setDialog(null); } },
           { label: 'Home', onClick: () => setMode('home') },
         ]
-      : mode === 'quick'
-        ? [
-            { label: 'Retry same Saturday', onClick: () => { game.retrySameSaturday(recommendedSetup()); setDialog(null); }, primary: true },
-            { label: 'New Saturday (different demand and events)', onClick: () => { game.newSaturday(recommendedSetup()); setDialog(null); } },
-            { label: 'Home', onClick: () => setMode('home') },
-          ]
-        : [
-            { label: 'Learn to play', onClick: learn },
-            { label: 'Home', onClick: () => setMode('home') },
-          ];
+      : [{ label: 'Play', onClick: () => setMode('campaign'), primary: true }];
 
   return (
     <div className={`app ${reduced ? 'reduced-motion' : ''}`}>
@@ -123,58 +86,13 @@ export default function App() {
       {mode === 'home' && (
         <>
           {bar(null)}
-          <Opening
-            week={{ label: week.started ? `Continue · ${weekdayName(week.camp.day)}, day ${week.camp.day + 1}` : 'Open the shop', continuing: week.started }}
-            onWeek={() => setMode('campaign')}
-            onQuick={() => startQuick()}
-            quickInProgress={quickInProgress}
-            onCustom={() => startQuick(true)}
-            onLearn={learn}
-            notice={week.notice}
-            onDismissNotice={week.dismissNotice}
-          />
-        </>
-      )}
-      {mode === 'tutorial' && (
-        <>
-          <StatusBar
-            state={null}
-            tutorial={{ label: lessonLabel, progress: Math.min(t.index, CORE_LESSONS) / CORE_LESSONS, onExit: exitTutorial }}
-            saveOk={game.saveOk}
-            onHelp={() => setDialog('help')}
-            onSettings={() => setDialog('settings')}
-            onMenu={() => setDialog('menu')}
-          />
-          <ShopScreen
-            key={`lesson-${t.index}`}
-            state={t.state}
-            plan={t.phase === 'plan' ? t.draft : null}
-            setPlan={t.setDraft}
-            phase={t.phase === 'plan' ? 'plan' : t.phase === 'replay' ? 'replay' : 'results'}
-            report={t.run?.report ?? null}
-            onRun={t.runNow}
-            onReplayDone={t.finishReplay}
-            reduced={reduced}
-            replaySpeed="normal"
-            steps={t.lesson.steps}
-            focus={t.phase === 'plan' ? t.lesson.focus(t.start, t.draft) : undefined}
-            primary={lessonPrimary(t, fullSaturday)}
-            panel={(ctx) => <LessonPanel t={t} ctx={ctx} onFullSaturday={fullSaturday} />}
-          />
+          <Opening label={week.started ? `Play · ${weekdayName(week.camp.day)}` : 'Play'} onPlay={() => setMode('campaign')} notice={week.notice} onDismissNotice={week.dismissNotice} />
         </>
       )}
       {mode === 'campaign' && <ShopView week={week} reduced={reduced} bar={bar} />}
-      {mode === 'quick' && <QuickView game={game} reduced={reduced} bar={bar} onHome={() => setMode('home')} />}
       {dialog === 'help' && <Help onClose={() => setDialog(null)} />}
-      {dialog === 'settings' && <SettingsDialog settings={game.settings} onChange={game.setSettings} onClose={() => setDialog(null)} />}
-      {dialog === 'menu' && (
-        <Menu
-          title={mode === 'campaign' ? 'Your shop' : mode === 'quick' ? 'Quick play' : 'Menu'}
-          note={mode === 'campaign' ? 'Restarting a day takes you back to its morning: the day’s choices are undone, earlier days are kept.' : mode === 'quick' ? 'Starting again discards this attempt.' : undefined}
-          items={menuItems}
-          onClose={() => setDialog(null)}
-        />
-      )}
+      {dialog === 'settings' && <SettingsDialog settings={settings} onChange={setSettings} onClose={() => setDialog(null)} />}
+      {dialog === 'menu' && <Menu title="Menu" items={menuItems} onClose={() => setDialog(null)} />}
     </div>
   );
 }
@@ -215,11 +133,7 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
       </>
     );
   }
-  const status: CampaignStatus = {
-    day: weekdayName(camp.day),
-    reputation: camp.reputation,
-    teamWellbeing: teamWellbeing(camp.staff),
-  };
+  const status: CampaignStatus = { day: weekdayName(camp.day) };
   return (
     <>
       {bar(state, status)}
@@ -290,40 +204,6 @@ function storeFloor(state: SimState): StoreFloor {
         : { text: BURST_TEXT[door.burst.kind].arriving, detail: `About ${door.burst.shoppers} shoppers coming in`, arriving: true }
       : null,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Quick play: one Saturday
-// ---------------------------------------------------------------------------
-
-function QuickView({ game, reduced, bar, onHome }: { game: Game; reduced: boolean; bar: (s: SimState | null) => JSX.Element; onHome: () => void }) {
-  if (game.phase === 'setup')
-    return (
-      <>
-        {bar(null)}
-        <Setup key={game.record.seed} seed={game.record.seed} onConfirm={game.confirmSetup} onBack={onHome} />
-      </>
-    );
-  if (!game.state) return null;
-  if (game.phase === 'closed')
-    return (
-      <>
-        {bar(null)}
-        <Closing
-          state={game.state}
-          targets={QUICK_TARGETS}
-          title="Saturday complete"
-          kicker={`Quick play${game.record.seed === 1 ? '' : ` · seed ${game.record.seed}`}`}
-          primary={{ label: 'Try again ▶', onClick: () => game.retrySameSaturday(recommendedSetup()) }}
-        />
-      </>
-    );
-  return (
-    <>
-      {bar(game.state)}
-      <LiveScreen day={game.day} state={game.state} reduced={reduced} />
-    </>
-  );
 }
 
 function prefersReducedMotion(): boolean {

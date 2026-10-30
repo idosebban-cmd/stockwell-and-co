@@ -3,17 +3,13 @@
  * improvement offers at closing.
  */
 import { useMemo, useState } from 'react';
-import { CONFIG, deptName, hourLabel, type ChilledLife, type DeptId } from '../sim/config';
-import { checkSetup, defaultPlan, deliveryUnitCost, money, pounds, weekdayName } from '../sim/engine';
+import { CONFIG } from '../sim/config';
+import { defaultPlan, money, pounds, weekdayName } from '../sim/engine';
 import { ROSTER } from '../sim/roster';
 import {
   allOffers,
   businessValue,
-  carriedQty,
   dayConfig,
-  dayContext,
-  dayScenario,
-  orderFunds,
   spendable,
   recommendOrder,
   startCampaignDay,
@@ -24,13 +20,11 @@ import {
   campaignPool,
   teamLimit,
   weekOf,
-  WEEK_DAYS,
 } from '../sim/campaign';
 import type { SetupPlan, SimState } from '../sim/types';
 import { ShopScreen } from './ShopScreen';
-import { Clock, CueArt, EquipArt, Lorry, Person, Sunrise, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
+import { EquipArt, Person, SPECIALITY_LABEL, SpecialitySymbol, type EquipId } from './Illustrations';
 import { SPECIALITY_TEXT } from '../sim/roster';
-import type { ShopNotice, ZoneId } from './Store';
 import { HiringPanel } from './Hiring';
 
 const K = CONFIG.campaign;
@@ -43,67 +37,11 @@ export function dayKicker(day: number): string {
 // Before opening
 // ---------------------------------------------------------------------------
 
-const EMPTY_ORDER = (camp: CampaignState): SetupPlan => ({
-  orders: { produce: { morning: 0, midday: 0 }, chilled: { morning: 0, midday: 0 }, ambient: { morning: 0, midday: 0 } },
-  chilledLife: { morning: 'short', midday: 'long' },
-  pricing: { ...camp.pricing },
-});
-
-interface Cue {
-  id: CueId;
-  label: string;
-  zones: ZoneId[];
-  text: string;
-}
-
-/** Three things worth knowing today, as pictures: they point at places in the shop and assign nobody. */
-function cuesFor(camp: CampaignState, ctx: ReturnType<typeof dayContext>): Cue[] {
-  const all: Record<CueId, Cue> = {
-    serve: { id: 'serve', label: 'Serve', zones: ['tills'], text: `Each open till serves about ${CONFIG.checkout.customersPerHour} customers an hour. Waits over ${CONFIG.checkout.patienceMinutes} minutes start losing shoppers.` },
-    restock: { id: 'restock', label: 'Restock', zones: ctx.depts.filter((d) => d !== 'chilled'), text: 'Shoppers only buy what is on the shelf. Whoever fills a department moves stock out from the stockroom.' },
-    rest: { id: 'rest', label: 'Rest', zones: ['break'], text: 'Energy falls while working. Half an hour in the break room restores it; tired people work slower.' },
-    unload: { id: 'unload', label: 'Unload', zones: ['dock'], text: `The midday lorry${ctx.middayHour !== null ? ` (${hourLabel(ctx.middayHour)})` : ''} leaves stock on the dock. Someone must unload it before shelves can be filled from it.` },
-    prices: { id: 'prices', label: 'Prices', zones: ctx.depts, text: 'During the day, click a department, then Change prices, to compare Low, Regular and High.' },
-    chilled: { id: 'chilled', label: 'Chilled', zones: ['chilled'], text: 'Chilled needs filling like any shelf, and spoils quickly if left on the dock.' },
-  };
-  const ids: CueId[] =
-    camp.day === 1 ? ['unload', 'restock', 'rest'] : camp.day === 2 ? ['prices', 'serve', 'rest'] : ctx.depts.includes('chilled') ? ['serve', 'chilled', 'rest'] : ['serve', 'restock', 'rest'];
-  return ids.map((x) => all[x]);
-}
-
-/** The shop before opening, with an illustrated briefing: when, how busy, what stock arrives, what it costs, today's goal. */
+/** The shop before opening: the morning's stock is already in. One button opens the doors. */
 export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; onOpen: (s: SetupPlan) => void; reduced: boolean }) {
-  const [order, setOrder] = useState<SetupPlan>(() => recommendOrder(camp));
-  const [adjust, setAdjust] = useState(false);
-  const [cue, setCue] = useState<CueId | null>(null);
-  const [orderInfo, setOrderInfo] = useState(false);
-  const ctx = dayContext(camp);
-  const sc = useMemo(() => dayScenario(camp), [camp]);
-  const have = carriedQty(camp);
-  const check = checkSetup(order, sc.forecast, { cash: orderFunds(camp), carried: have, ctx });
-  const preview = useMemo(() => {
-    try {
-      return startCampaignDay(camp, check.errors.length ? EMPTY_ORDER(camp) : order);
-    } catch {
-      return startCampaignDay(camp, EMPTY_ORDER(camp));
-    }
-  }, [camp, order, check.errors.length]);
+  const order = useMemo(() => recommendOrder(camp), [camp]);
+  const preview = useMemo(() => startCampaignDay(camp, order), [camp, order]);
   const plan = useMemo(() => defaultPlan(preview), [preview]);
-  const cfg = dayConfig(camp.day);
-  const after = camp.cash - check.cost;
-  const set = (d: DeptId, k: 'morning' | 'midday', v: number) => setOrder((o) => ({ ...o, orders: { ...o.orders, [d]: { ...o.orders[d], [k]: Math.max(0, Math.round(v)) } } }));
-  const setLife = (k: 'morning' | 'midday', l: ChilledLife) => setOrder((o) => ({ ...o, chilledLife: { ...o.chilledLife, [k]: l } }));
-  const cues = cuesFor(camp, ctx);
-  const active = cues.find((c) => c.id === cue) ?? null;
-
-  // Stock labels beside the shelves, and the midday lorry by the dock.
-  const notices: ShopNotice[] = ctx.depts.map((d) => {
-    const n = order.orders[d].morning;
-    return n > 0 ? { zone: d, text: `+${n} arriving`, tone: 'good' as const } : { zone: d, text: `${Math.round(have[d])} in stock · No order`, tone: 'info' as const };
-  });
-  const midday = ctx.depts.reduce((t, d) => t + order.orders[d].midday, 0);
-  if (ctx.middayHour !== null && midday > 0) notices.push({ zone: 'dock', text: `Lorry ${hourLabel(ctx.middayHour)} · +${midday}`, tone: 'info' });
-
   return (
     <ShopScreen
       state={preview}
@@ -111,173 +49,20 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
       setPlan={() => {}}
       phase="plan"
       report={null}
-      onRun={() => !check.errors.length && onOpen(order)}
+      onRun={() => onOpen(order)}
       onReplayDone={() => {}}
       reduced={reduced}
       replaySpeed="normal"
       steps={6}
       interactive={false}
-      focus={active ? { staff: [], zones: active.zones } : undefined}
-      notices={notices}
-      primary={{
-        label: 'Confirm order & open ▶',
-        onClick: () => onOpen(order),
-        disabled: check.errors.length > 0,
-        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading`,
-        noteTone: check.errors.length ? 'bad' : undefined,
-      }}
+      primary={{ label: 'Open the shop ▶', onClick: () => onOpen(order) }}
       panel={() => (
         <div className="panel-inner briefing">
-          <h2 className="sr-only">Before opening: {weekdayName(camp.day)}</h2>
-          <DayMarkers day={camp.day} />
-          <div className="brief-row">
-            <Clock hour={9} />
-            <strong className="brief-hours">
-              {hourLabel(0)}–{hourLabel(cfg.hours)}
-            </strong>
-            <span className="today-badge">Day {camp.day + 1}</span>
-          </div>
-          <MiniForecast forecast={sc.forecast} />
-
-          {adjust ? (
-            <div className="order-edit">
-              <p className="brief-sub">Adjust order</p>
-              <ul className="order-list">
-                {ctx.depts.map((d) => (
-                  <li key={d}>
-                    <span className="ol-dept">{deptName(d)}</span>
-                    <span className="ol-edit">
-                      {/* orders.morning: put away by the night crew before opening. */}
-                      <span className="ol-delivery">
-                        <span className="ol-when">
-                          <Sunrise /> Before opening
-                        </span>
-                        <Qty label={`${deptName(d)}: before opening`} value={order.orders[d].morning} onChange={(v) => set(d, 'morning', v)} />
-                      </span>
-                      {/* orders.midday: reaches the dock at the day's midday hour; only on days that have one. */}
-                      {ctx.middayHour !== null && (
-                        <span className="ol-delivery">
-                          <span className="ol-when">
-                            <Lorry /> Delivery at {hourLabel(ctx.middayHour)}
-                          </span>
-                          <Qty label={`${deptName(d)}: delivery at ${hourLabel(ctx.middayHour)}`} value={order.orders[d].midday} onChange={(v) => set(d, 'midday', v)} />
-                        </span>
-                      )}
-                    </span>
-                    {d === 'chilled' && (
-                      <span className="ol-life">
-                        {(['morning', 'midday'] as const)
-                          .filter((k) => k === 'morning' || ctx.middayHour !== null)
-                          .map((k) => (
-                            <label key={k}>
-                              {k === 'morning' ? 'Morning' : 'Midday'}:{' '}
-                              <select value={order.chilledLife[k]} onChange={(e) => setLife(k, e.target.value as ChilledLife)}>
-                                <option value="short">Use by today · {money(deliveryUnitCost('chilled', 'short'))}</option>
-                                <option value="long">Keeps 3 days · {money(deliveryUnitCost('chilled', 'long'))}</option>
-                              </select>
-                            </label>
-                          ))}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <div className="brief-links">
-                <button type="button" className="btn-link" onClick={() => setOrder(recommendOrder(camp))}>
-                  Recommended order
-                </button>
-                <button type="button" className="btn-action" onClick={() => setAdjust(false)}>
-                  Done
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <ul className="cues" aria-label="Today’s basics">
-                {cues.map((c) => (
-                  <li key={c.id}>
-                    <button type="button" className={`cue ${cue === c.id ? 'on' : ''}`} aria-pressed={cue === c.id} onClick={() => setCue(cue === c.id ? null : c.id)}>
-                      <CueArt cue={c.id} />
-                      <span>{c.label}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <p className="cue-text" aria-live="polite">
-                {active ? active.text : 'Select a picture to see where it happens.'}
-              </p>
-            </>
-          )}
-
-          <div className="order-sum">
-            <span>
-              Order <strong>{money(check.cost)}</strong>
-            </span>
-            <span>
-              Cash after <strong className={after < 0 ? 'bad' : ''}>{money(after)}</strong>
-            </span>
-            {!adjust && (
-              <button type="button" className="btn-link" onClick={() => setAdjust(true)}>
-                Adjust order
-              </button>
-            )}
-            <button type="button" className="info-btn" aria-expanded={orderInfo} aria-label="How the order is worked out" onClick={() => setOrderInfo((x) => !x)}>
-              i
-            </button>
-          </div>
-          {orderInfo && <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the shelf and stockroom space, and your cash.</p>}
-          <p className="float-note">{pounds(K.tillFloat)} kept in the till for the day.</p>
-          {camp.credit > 0.5 && <p className="credit-note">Owed to the wholesaler: {money(camp.credit)}, repaid from takings.</p>}
+          <h2 className="morning-day">{weekdayName(camp.day)}</h2>
+          <p className="morning-line">Stock is in!</p>
         </div>
       )}
     />
-  );
-}
-
-function DayMarkers({ day }: { day: number }) {
-  const today = day % WEEK_DAYS;
-  return (
-    <ol className="days" aria-label={`Day ${day + 1}: ${weekdayName(day)}, week ${weekOf(day) + 1}`}>
-      {Array.from({ length: WEEK_DAYS }, (_, i) => (
-        <li key={i} className={i < today ? 'past' : i === today ? 'today' : ''} aria-hidden="true">
-          {weekdayName(i, true)}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function Qty({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <span className="qty-row small">
-      <button type="button" className="btn-qty" aria-label={`20 fewer: ${label}`} onClick={() => onChange(Math.max(0, value - 20))}>
-        −
-      </button>
-      <input type="number" aria-label={label} min={0} step={20} value={value} onChange={(e) => onChange(Number(e.target.value) || 0)} />
-      <button type="button" className="btn-qty" aria-label={`20 more: ${label}`} onClick={() => onChange(value + 20)}>
-        +
-      </button>
-    </span>
-  );
-}
-
-function MiniForecast({ forecast }: { forecast: number[] }) {
-  const max = Math.max(...forecast);
-  const peak = forecast.indexOf(max);
-  const total = forecast.reduce((t, x) => t + x, 0);
-  return (
-    <figure className="mini-fc">
-      <figcaption>Expected customers · {total}</figcaption>
-      <ol className="mini-forecast" aria-label={`Expected customers: ${forecast.map((f, h) => `${hourLabel(h)} ${f}`).join(', ')}. Busiest ${hourLabel(peak)}.`}>
-        {forecast.map((f, h) => (
-          <li key={h} aria-hidden="true" className={h === peak ? 'peak' : ''}>
-            {h === peak && <span className="mf-peak">busiest</span>}
-            <span className="mf-bar" style={{ height: `${Math.max(8, (f / max) * 100)}%` }} />
-            <span className="mf-h">{hourLabel(h).slice(0, 2)}</span>
-          </li>
-        ))}
-      </ol>
-    </figure>
   );
 }
 
@@ -340,7 +125,6 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
     <section className="invest" aria-labelledby="invest-h">
       <div className="invest-head">
         <h2 id="invest-h">Improve the shop</h2>
-        <p className="float-note">{pounds(K.tillFloat)} kept in the till for the day.</p>
         {bought.length > 0 && (
           <ul className="bought">
             {bought.map((id) => (

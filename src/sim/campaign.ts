@@ -12,7 +12,6 @@
  */
 import { CONFIG, DEPTS, type CampaignDayConfig, type DeptId, type PriceTier } from './config';
 import {
-  checkSetup,
   clamp,
   datedBatches,
   deliveryUnitCost,
@@ -231,10 +230,9 @@ export function dayScenario(camp: CampaignState): Scenario {
   const noise = (amount: number) => Array.from({ length: n }, () => 1 + signed(rng) * amount);
   const customerNoise = noise(C.demand.customerNoise);
   const deptNoise = perDept(() => noise(C.demand.deptNoise));
-  const hasChilled = owns(camp, 'chilled');
+  // Only busy days: fridge faults and late lorries were problems with no fun answer.
   const events = cfg.events
-    .filter((e) => (e.kind === 'fridgeFault' ? hasChilled && !owns(camp, 'fridge') : true))
-    .filter((e) => (e.kind === 'delayedDelivery' ? cfg.middayHour !== null : true))
+    .filter((e) => e.kind === 'rush')
     .map((e) => ({ id: `${e.kind}-${camp.day}`, kind: e.kind, hour: e.hour, warnAt: e.warnAt }));
   return {
     seed: camp.seed,
@@ -294,7 +292,8 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
     scenario,
     ctx: dayContext(camp),
     cash: camp.cash,
-    keep: K.tillFloat,
+    // Stock always arrives, whatever the cash (it may dip below zero for a while).
+    keep: -Infinity,
     credit: { owed: camp.credit, limit: 0 },
     carried: carriedFor(camp),
     staff: campaignStaff(camp),
@@ -307,14 +306,14 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
 // Recommended order
 // ---------------------------------------------------------------------------
 
-/** What the morning order and upgrades can spend: cash less the till float. */
+/** What upgrades can spend. */
 export function spendable(camp: CampaignState): number {
-  return Math.max(0, camp.cash - K.tillFloat);
+  return Math.max(0, camp.cash);
 }
 
-/** What an order can draw on. */
-export function orderFunds(camp: CampaignState): number {
-  return spendable(camp);
+/** The morning's stock is always delivered. */
+export function orderFunds(_camp: CampaignState): number {
+  return Infinity;
 }
 
 /** Estimated wages and day costs, for keeping cash back. */
@@ -355,17 +354,8 @@ export function recommendOrder(camp: CampaignState): SetupPlan {
       orders[d].midday = round10(Math.min(want - orders[d].morning, roomAtMid, C.openingOrder.maxMidday));
     }
   }
-  const setup: SetupPlan = { orders, chilledLife: { morning: 'short', midday: 'long' }, pricing };
-  // Keep cash back for the day; scale the order down if it would leave too little.
-  const budget = Math.max(0, orderFunds(camp) - (dayCostEstimate(camp) / ctx.hours) * K.orderReserveHours);
-  const cost = checkSetup(setup, sc.forecast, { cash: Infinity, carried: have, ctx }).cost;
-  if (cost > budget) {
-    const k = cost > 0 ? budget / cost : 0;
-    for (const d of DEPTS) {
-      orders[d].morning = Math.floor((orders[d].morning * k) / 10) * 10;
-      orders[d].midday = Math.floor((orders[d].midday * k) / 10) * 10;
-    }
-  }
+  // Longer-life chilled stock, so nothing goes off the same day.
+  const setup: SetupPlan = { orders, chilledLife: { morning: 'long', midday: 'long' }, pricing };
   return setup;
 }
 
@@ -495,7 +485,7 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
     const reason = owned ? 'Already installed.' : unavailable ?? (spendable(camp) < o.cost ? needs(o.cost) : null);
     out.push({ id, ...o, available: reason === null, reason, cashAfter: camp.cash - o.cost });
   };
-  const needs = (cost: number) => `Needs ${money(cost)}; you can spend ${money(spendable(camp))} (${money(K.tillFloat)} stays in the till).`;
+  const needs = (cost: number) => `Needs ${money(cost)}.`;
   const tooEarly = (from: number) => (camp.day < from + 1 ? `Available from ${weekdayName(from + 1)}.` : null);
   const ended: string | null = null;
 

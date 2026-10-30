@@ -37,6 +37,24 @@ export const CONFIG = {
     breakMinutes: 30,
     /** Autosave at least this often while the clock runs (real seconds). */
     autosaveSeconds: 5,
+    /**
+     * Routine jobs run themselves: deliveries unload by themselves, people with nothing to fill move to the
+     * shelf that needs it most, and tired people take a break one at a time when the shop isn't busy.
+     * Checked every `everyMinutes`; the player can move anyone at any time.
+     */
+    auto: {
+      everyMinutes: 5,
+      /** A filler moves on when their shelf needs less than this (share of the shelf empty) … */
+      doneBelow: 0.1,
+      /** … to a shelf that needs at least this much. */
+      moveAbove: 0.2,
+      /** Go for a break below this energy … */
+      breakBelow: 45,
+      /** … unless more than this many shoppers wait per open till, or a burst is under way. */
+      busyQueuePerTill: 4,
+      /** After being called back from a break, no automatic break for this long (minutes). */
+      holdMinutes: 60,
+    },
   },
 
   /**
@@ -321,7 +339,7 @@ export const CONFIG = {
     limits: { tills: 3, replenish: 2, receive: 2, break: 2 },
     receiveRate: 500,
     /** Energy change per hour by job. */
-    energy: { tills: -13, replenish: -15, receive: -18, break: 40 },
+    energy: { tills: -10, replenish: -11, receive: -13, break: 40 },
     /** Below this energy, productivity falls linearly to `minProductivity` at 0. */
     tiredBelow: 50,
     minProductivity: 0.55,
@@ -444,8 +462,9 @@ export const CONFIG = {
     startCash: 1500,
     /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */
     unlocks: {
-      pricing: 2,
-      actions: { emergency: 0, cashAndCarry: 0, nextDelivery: 0, letRunOut: 0, hire: 0, letGo: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
+      /** Prices are fixed: never unlocked. */
+      pricing: Infinity,
+      actions: { hire: 0, letGo: 0 },
     },
     /**
      * The first days forgive mistakes rather than lowering the activity: shoppers wait longer before giving up,
@@ -455,11 +474,6 @@ export const CONFIG = {
     /** Word gets round: each completed week brings this many more shoppers, up to `maxGrowth`. */
     weeklyGrowth: 0.05,
     maxGrowth: 0.3,
-    /**
-     * The till float: cash the morning order and upgrades can't spend, so there is always money in the till for the day.
-     * Rush deliveries and cash-and-carry during the day can use it.
-     */
-    tillFloat: 150,
     /**
      * Stock bought on the wholesaler's account (no longer offered). Saves from before it was removed may still owe some:
      * `repayShare` of takings pays it off.
@@ -483,8 +497,8 @@ export const CONFIG = {
       ],
     } as Record<DeptId, { qty: number; days: number | null; where: 'shelf' | 'backroom' }[]>,
     /** A modest shop with small displays: they hold roughly an hour or two of trade, so they need topping up from the stockroom during the day. */
-    shelf: { produce: 140, chilled: 100, ambient: 220 } as Record<DeptId, number>,
-    backroom: { produce: 400, chilled: 300, ambient: 800 } as Record<DeptId, number>,
+    shelf: { produce: 200, chilled: 140, ambient: 300 } as Record<DeptId, number>,
+    backroom: { produce: 600, chilled: 360, ambient: 1300 } as Record<DeptId, number>,
     /** Day costs: rent and rates per day, energy and the like per trading hour. */
     rentPerDay: 90,
     costsPerHour: 14,
@@ -497,7 +511,7 @@ export const CONFIG = {
      * Recommended orders buy the forecast times this: room for the day's bursts of shoppers (about 15% more) and the hidden
      * variation, more for cupboard stock, which keeps. Space and cash still cap it.
      */
-    orderCover: { perishable: 1.25, ambient: 1.35 },
+    orderCover: { perishable: 1.45, ambient: 1.6 },
     /** Recommended orders keep this many hours of wages and costs back (the rest is paid from takings). */
     orderReserveHours: 1,
     days: [

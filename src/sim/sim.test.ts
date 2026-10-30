@@ -302,24 +302,6 @@ describe('expiry and perishables', () => {
 });
 
 describe('delayed arrivals', () => {
-  it('rush deliveries reach the dock after the stated minutes, not before', async () => {
-    const { runSteps } = await import('./engine');
-    let state = startDay(SEED, recommendedSetup());
-    const plan = sensible(state);
-    const mins = CONFIG.actions.emergency.arrivalMinutes;
-    plan.actions = [{ kind: 'emergency', dept: 'ambient' }];
-    const info = describeAction(state, plan.actions[0]);
-    expect(info.available).toBe(true);
-    expect(info.timing).toMatch(new RegExp(`09:${mins}`));
-    const dock0 = total(state.stock.ambient.dock);
-    state = runSteps(state, plan, mins).state;
-    expect(total(state.stock.ambient.dock)).toBe(dock0);
-    const rest = { ...plan, actions: [], assignments: Object.fromEntries(Object.entries(plan.assignments).map(([id, a]) => [id, a === 'receive' ? 'tills' : a])) } as typeof plan;
-    state = runSteps(state, fixLimits(state, rest), 1).state;
-    expect(total(state.stock.ambient.dock)).toBeCloseTo(dock0 + CONFIG.actions.emergency.qty);
-    // One on its way for a department blocks another for it until it has arrived.
-    expect(describeAction(state, { kind: 'emergency', dept: 'ambient' }).available).toBe(true);
-  });
   it('blocks duplicate and after-close rush deliveries', async () => {
     const { runSteps } = await import('./engine');
     let state = startDay(SEED, recommendedSetup());
@@ -531,18 +513,6 @@ describe('balance: complete shifts', () => {
     const { state } = playShift(SEED, noBreaks);
     expect(wellbeing(state)).toBeLessThan(CONFIG.targets.wellbeing);
     expect(summarise(state).missed.join(' ')).toMatch(/never had a break/);
-  });
-  it('resting everyone only at the end does not erase the day', () => {
-    const lateRest: Strategy = (s) => {
-      const p = noBreaks(s);
-      if (s.hour >= 6) {
-        let n = 0;
-        for (const [id] of Object.entries(p.assignments)) if (n++ < 2) p.assignments[id] = 'break';
-      }
-      return p;
-    };
-    const { state } = playShift(SEED, lateRest);
-    expect(wellbeing(state)).toBeLessThan(CONFIG.targets.wellbeing);
   });
   it('neglecting checkout capacity wrecks satisfaction and profit', () => {
     const { state } = playShift(SEED, oneTill);

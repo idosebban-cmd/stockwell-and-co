@@ -211,7 +211,8 @@ function StoreImpl(props: Props) {
   const fit = props.fit;
   const L = layoutFor(fit);
   const SLOTS = L.slots;
-  const zones = L.zones.filter((z) => !['produce', 'chilled', 'ambient'].includes(z.z) || fit.depts.includes(z.z as DeptId));
+  // The dock unloads itself, so it isn't a place to send people.
+  const zones = L.zones.filter((z) => z.z !== 'dock' && (!['produce', 'chilled', 'ambient'].includes(z.z) || fit.depts.includes(z.z as DeptId)));
   const counts = new Map<AssignmentId, number>();
   const placed: { s: StaffMember; a: AssignmentId; x: number; y: number }[] = [];
   for (const s of staff) {

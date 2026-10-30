@@ -4169,3 +4169,23 @@ ul.tannoy {
 .value-parts .bad strong {
   color: var(--bad);
 }
+.morning-day {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 2rem;
+  color: var(--burgundy-dark);
+}
+.morning-line {
+  margin: 6px 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+.help-short {
+  font-size: 1.15rem;
+  line-height: 1.8;
+  padding-left: 1.2em;
+}
+.card-line {
+  margin: 0 0 8px;
+  font-weight: 700;
+}

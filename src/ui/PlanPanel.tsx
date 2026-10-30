@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CONFIG, DEPTS, deptName, hourLabel, hourRange, type DeptId, type PriceTier } from '../sim/config';
+import { CONFIG, DEPTS, deptName, hourLabel, hourRange, type DeptId } from '../sim/config';
 import {
   STEP_MINUTES,
   clockLabel,
@@ -8,32 +8,23 @@ import {
   backroomCapacity,
   describeAction,
   deptUnits,
-  expectedCustomers,
+  weekdayName,
   money,
   onShift,
   productivity,
-  shelfCapacity,
-  shortDatedUnits,
 } from '../sim/engine';
 import { previewWarnings } from '../sim/explain';
 import {
-  runOutWarnings,
-  fridgeFacts,
   jobPreview,
   outlook as computeOutlook,
   outlookChanges,
-  priceModifiers,
-  priceOptions,
-  priceTradeOff,
   problems as computeProblems,
   type Outlook,
   type Zone,
 } from '../sim/insight';
 import { ASSIGNMENT_LABEL, ROSTER, SPECIALITY_TEXT, TEMP_ENTRY } from '../sim/roster';
-import { total } from '../sim/stock';
 import { ASSIGNMENTS, type ActionRequest, type AssignmentId, type HourPlan, type SimState } from '../sim/types';
 import { ZONE_NAME, type ZoneId } from './Store';
-import { StockroomCard } from './StockroomCard';
 import { HiringPanel, LetGo, PersonFacts, TraitChips, type HiringProps } from './Hiring';
 import { Forecast } from './Forecast';
 import type { Selection } from './ShopScreen';
@@ -96,7 +87,7 @@ export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME
     case 'staff':
       return <StaffCard state={state} plan={plan} onChange={onChange} id={sel.id} onClose={close} />;
     case 'zone':
-      return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} onStockroom={() => setSel({ kind: 'stockroom' })} />;
+      return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} />;
     case 'office':
       return (
         <section className="panel-inner context-card" aria-label="Office: hiring">
@@ -104,15 +95,8 @@ export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME
           {hiring ? <HiringPanel {...hiring} /> : <p className="idle-hint">Hiring is part of running your own shop.</p>}
         </section>
       );
-    case 'stockroom':
-      return (
-        <section className="panel-inner context-card" aria-label="Stockroom">
-          <PanelHead title="Stockroom" kicker="Order more stock" onClose={close} />
-          <StockroomCard state={state} plan={plan} onOrder={(a) => onChange({ ...plan, actions: [...plan.actions, a] })} />
-        </section>
-      );
     case 'attention':
-      return <AttentionPanel state={state} plan={plan} onOpen={open} onStockroom={() => setSel({ kind: 'stockroom' })} onClose={close} onOutlook={() => setSel({ kind: 'outlook' })} />;
+      return <AttentionPanel state={state} plan={plan} onOpen={open} onStockroom={close} onClose={close} onOutlook={() => setSel({ kind: 'outlook' })} />;
     case 'team':
       return (
         <div className="panel-inner">
@@ -142,15 +126,8 @@ export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME
 function IdlePanel({ state }: { state: SimState }) {
   return (
     <div className="panel-inner idle">
-      <PanelHead title={hourRange(state.hour)} kicker={`~${Math.round(expectedCustomers(state))} customers expected`} />
-      {state.announcements.length > 0 && (
-        <ul className="tannoy" aria-label="Announcements">
-          {state.announcements.map((a, i) => (
-            <li key={i}>{a}</li>
-          ))}
-        </ul>
-      )}
-      <p className="idle-hint">Select a person or a place in the shop to see what you can do there.</p>
+      <h2 className="morning-day">{weekdayName(state.ctx.weekday)}</h2>
+      <p className="idle-hint">Drag staff to jobs.</p>
     </div>
   );
 }
@@ -366,7 +343,6 @@ export function ContextCard({
   zone,
   onClose,
   opts = FULL_GAME,
-  onOpen,
   onStockroom,
 }: {
   state: SimState;
@@ -382,8 +358,7 @@ export function ContextCard({
   return (
     <section className="panel-inner context-card" aria-label={ZONE_NAME[zone]}>
       <PanelHead title={ZONE_NAME[zone]} kicker="Selected" onClose={onClose} />
-      {zone === 'chilled' && state.fridge.status === 'fault' && <FridgeCard state={state} plan={plan} onChange={onChange} allowActions={opts.allowActions} />}
-      {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptCard state={state} plan={plan} onChange={onChange} d={zone} opts={opts} onOpen={onOpen} onStockroom={onStockroom} />}
+      {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptCard state={state} plan={plan} onChange={onChange} d={zone} />}
       {zone === 'tills' && <TillCard state={state} plan={plan} onChange={onChange} opts={opts} />}
       {zone === 'dock' && <DockCard state={state} plan={plan} onChange={onChange} opts={opts} onStockroom={onStockroom} />}
       {zone === 'break' && <BreakCard state={state} plan={plan} onChange={onChange} />}
@@ -391,156 +366,13 @@ export function ContextCard({
   );
 }
 
-function FridgeCard({ state, plan, onChange, allowActions }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; allowActions: boolean }) {
-  const f = fridgeFacts(state, plan);
-  const repair: ActionRequest = { kind: 'repair' };
-  const planned = plan.actions.some((a) => a.kind === 'repair');
-  const info = describeAction(state, repair, plan.actions.filter((a) => a.kind !== 'repair'));
-  return (
-    <div className="decision urgent">
-      <p className="decision-title">
-        <span aria-hidden="true">!</span> Chiller fault: half the cabinets are off
-      </p>
-      <dl className="facts">
-        <dt>Shelf space</dt>
-        <dd>
-          {Math.round(f.capacity)} of {f.fullCapacity}
-        </dd>
-        <dt>At risk now</dt>
-        <dd className={f.atRisk > 0 ? 'bad' : ''}>
-          {Math.round(f.atRisk)} items · {money(f.atRiskValue)}
-        </dd>
-        <dt>If you wait</dt>
-        <dd>Stranded stock spoils (~{f.spoilPerHour}%/h); shelf stays half size</dd>
-      </dl>
-      <div className="responses">
-        <div className="response">
-          <div>
-            <strong>Book the engineer</strong>
-            <span className="tiny">
-              {money(f.cost)} · fixed ~{f.engineerAt} · no staff needed
-            </span>
-          </div>
-          {state.fridge.repairAtStep !== null ? (
-            <span className="status-pill">Engineer booked · {f.engineerAt}</span>
-          ) : !allowActions ? null : planned ? (
-            <button type="button" className="btn-action btn-action-on" onClick={() => onChange({ ...plan, actions: plan.actions.filter((a) => a.kind !== 'repair') })}>
-              Booked ✓ (undo)
-            </button>
-          ) : (
-            <button type="button" className="btn-action" disabled={!info.available} onClick={() => onChange({ ...plan, actions: [...plan.actions, repair] })} title={info.reason ?? ''}>
-              Book · {money(f.cost)}
-            </button>
-          )}
-        </div>
-        <div className="response">
-          <div>
-            <strong>Move stock to the cold room</strong>
-            <span className="tiny">Whoever is on Fill chilled shelves does this first · cold-room space {Math.round(f.coldRoomSpace)}</span>
-          </div>
-          {f.movers.length ? <span className="status-pill">Moving stock: {f.movers.join(', ')}</span> : <span className="status-pill warn">Nobody moving stock</span>}
-        </div>
-      </div>
-      {!f.movers.length && <StaffPicker state={state} plan={plan} onChange={onChange} job="replenish:chilled" title="Put someone on chilled" />}
-    </div>
-  );
-}
-
-function DeptCard({ state, plan, onChange, d, opts, onOpen, onStockroom }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId; opts: PanelOptions; onOpen?: (z: ZoneId) => void; onStockroom?: () => void }) {
-  const runOut = onStockroom ? runOutWarnings(state).find((w) => w.dept === d) : undefined;
-  const u = deptUnits(state, d);
-  const cap = shelfCapacity(state, d);
+function DeptCard({ state, plan, onChange, d }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId }) {
   const job: AssignmentId = `replenish:${d}` as AssignmentId;
   const fillers = onShift(state).filter((s) => plan.assignments[s.id] === job);
-  const look = useMemo(() => computeOutlook(state, plan, opts.steps), [state, plan, opts.steps]);
-  const row = look?.rows.find((r) => r.zone === d);
-  const short = shortDatedUnits(state, d);
-  const friday = d === 'produce' ? total([...state.stock.produce.shelf, ...state.stock.produce.backroom].filter((b) => b.label === "Friday's produce")) : 0;
-  const incoming = state.deliveries.filter((x) => x.dept === d);
-  const problem = row && row.status !== 'ok';
-  const [pricesOpen, setPricesOpen] = useState(opts.pricing === d);
-  const actions: ActionRequest[] = [];
-  if (opts.allowActions) {
-    if (CONFIG.departments[d].perishable) actions.push({ kind: 'markdown', dept: d });
-    actions.push({ kind: 'promotion', dept: d });
-    // Ordering more stock lives in the stockroom panel (live play); the lessons keep the old emergency order.
-    if (!onStockroom) actions.push({ kind: 'emergency', dept: d });
-  }
-  const allowed = actions.filter((a) => state.ctx.actions.includes(a.kind));
   return (
     <>
-      {runOut && (
-        <div className={`decision ${runOut.minutes <= 20 ? 'urgent' : ''}`}>
-          <p className="decision-title">
-            <span aria-hidden="true">!</span> Runs out ~{clockLabel(Math.floor(runOut.at / CONFIG.stepsPerHour), runOut.at % CONFIG.stepsPerHour)}
-          </p>
-          <p className="tiny">At today’s forecast, counting what’s on its way (estimate).</p>
-          <button type="button" className="btn-action" onClick={onStockroom}>
-            Order more in the stockroom →
-          </button>
-        </div>
-      )}
-      {problem && (
-        <div className="decision">
-          <p className="decision-title">
-            <span aria-hidden="true">!</span> {row!.status === 'short' ? 'Shelves likely to run short' : 'Shelves running low'}
-          </p>
-          <p className="tiny">{row!.text} (estimate)</p>
-          {u.backroom < 1 && u.dock > 0 ? (
-            <button type="button" className="btn-action" onClick={() => onOpen?.('dock')}>
-              Stock is on the dock: unload it first →
-            </button>
-          ) : u.backroom < 1 && onStockroom && !runOut ? (
-            <button type="button" className="btn-action" onClick={onStockroom}>
-              None in the stockroom: order more →
-            </button>
-          ) : null}
-        </div>
-      )}
-      <dl className="facts">
-        <dt>Shelf</dt>
-        <dd>
-          {Math.round(u.shelf)} / {Math.round(cap)}
-        </dd>
-        <dt>Stockroom</dt>
-        <dd className={u.backroom < 1 ? 'bad' : ''}>{Math.round(u.backroom)}</dd>
-        {u.dock > 0 && (
-          <>
-            <dt>On the dock</dt>
-            <dd className="bad">{Math.round(u.dock)} to unload</dd>
-          </>
-        )}
-        {incoming.map((x) => (
-          <div key={x.id} className="contents">
-            <dt>Delivery: {clockLabel(Math.floor((x.arrivesAtStep ?? x.arrivesAt * CONFIG.stepsPerHour) / CONFIG.stepsPerHour), (x.arrivesAtStep ?? 0) % CONFIG.stepsPerHour)}</dt>
-            <dd>{Math.round(x.qty)}</dd>
-          </div>
-        ))}
-        {d === 'chilled' && short >= 1 && (
-          <>
-            <dt>Expires tonight</dt>
-            <dd>{Math.round(short)}</dd>
-          </>
-        )}
-        {friday >= 1 && state.hour < 4 && (
-          <>
-            <dt>Expires 13:00</dt>
-            <dd>{Math.round(friday)}</dd>
-          </>
-        )}
-        <dt>Filling</dt>
-        <dd>{fillers.length ? fillers.map((s) => s.name).join(', ') : 'nobody'}</dd>
-      </dl>
-      {!pricesOpen && <StaffPicker state={state} plan={plan} onChange={onChange} job={job} title={fillers.length ? 'Add another filler' : 'Put someone on these shelves'} compact={!problem} />}
-      {(opts.pricing === 'all' || opts.pricing === d) && state.ctx.pricing && (
-        <PriceSection state={state} plan={plan} onChange={onChange} d={d} steps={opts.steps} fixed={opts.pricing === d} open={pricesOpen} setOpen={setPricesOpen} />
-      )}
-      {allowed.length > 0 && (
-        <details className="more-actions">
-          <summary>More actions</summary>
-          <ActionList state={state} plan={plan} onChange={onChange} actions={allowed} label={actionShortLabel} />
-        </details>
-      )}
+      <p className="card-line">{fillers.length ? `Filling: ${fillers.map((s) => s.name).join(', ')}` : 'Nobody filling'}</p>
+      <StaffPicker state={state} plan={plan} onChange={onChange} job={job} title="Send someone" compact />
     </>
   );
 }
@@ -707,198 +539,6 @@ function StaffPicker({ state, plan, onChange, job, title, compact }: { state: Si
 // ---------------------------------------------------------------------------
 // Price comparison (only when the player asks for it)
 // ---------------------------------------------------------------------------
-
-function PriceSection({
-  state,
-  plan,
-  onChange,
-  d,
-  steps,
-  fixed,
-  open,
-  setOpen,
-}: {
-  state: SimState;
-  plan: HourPlan;
-  onChange: (p: HourPlan) => void;
-  d: DeptId;
-  steps: number;
-  fixed: boolean;
-  open: boolean;
-  setOpen: (f: (o: boolean) => boolean) => void;
-}) {
-  const tier = plan.pricing[d];
-  return (
-    <div className="price-section">
-      <div className="price-line">
-        <span>
-          Price: <strong>{CONFIG.pricing[tier].label}</strong> {money(CONFIG.departments[d].standardPrice * CONFIG.pricing[tier].priceMult)}
-        </span>
-        {!fixed && (
-          <button type="button" className="btn-action" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-            {open ? 'Hide prices' : 'Change prices'}
-          </button>
-        )}
-      </div>
-      {open && <PriceComparison state={state} plan={plan} onChange={onChange} d={d} steps={steps} />}
-    </div>
-  );
-}
-
-export function PriceComparison({ state, plan, onChange, d, steps }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId; steps: number }) {
-  const opts = useMemo(() => priceOptions(state, plan, d, steps), [state, plan, d, steps]);
-  const tier = plan.pricing[d];
-  const sel = opts.find((o) => o.tier === tier)!;
-  const tradeOff = priceTradeOff(state, opts, tier, d);
-  const mods = priceModifiers(state, plan, d);
-  const warn =
-    sel.shortDatedLeft > 20 && state.ctx.hours - state.hour <= 3
-      ? `~${Math.round(sel.shortDatedLeft)} short-dated left after this ${intervalLabel(steps)}`
-      : sel.walkouts >= 2
-        ? `~${Math.round(sel.walkouts)} may give up queueing`
-        : null;
-  const set = (t: PriceTier) => onChange({ ...plan, pricing: { ...plan.pricing, [d]: t } });
-  return (
-    <div className="price-compare">
-      <p className="picker-title">
-        <span className="est">Estimate · next {intervalLabel(steps)}</span>
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Price</th>
-            <th scope="col">Each</th>
-            <th scope="col">Margin</th>
-            <th scope="col">Sold</th>
-            <th scope="col">Gross profit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {opts.map((o) => (
-            <tr key={o.tier} className={o.tier === tier ? 'pc-on' : ''} onClick={() => set(o.tier)}>
-              <th scope="row">
-                <label>
-                  <input type="radio" name={`pc-${d}`} checked={o.tier === tier} onChange={() => set(o.tier)} /> {CONFIG.pricing[o.tier].short}
-                </label>
-              </th>
-              <td>{money(o.price)}</td>
-              <td>{money(o.margin)}</td>
-              <td>~{Math.round(o.sold)}</td>
-              <td>~£{Math.round(o.grossProfit)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="pc-tradeoff">{tradeOff}</p>
-      {warn && <p className="tiny bad">⚠ {warn}</p>}
-      {mods.map((m) => (
-        <p key={m} className="tiny">
-          {m}
-        </p>
-      ))}
-      <details>
-        <summary>Details</summary>
-        <table className="mini-table">
-          <thead>
-            <tr>
-              <th scope="col"></th>
-              {opts.map((o) => (
-                <th key={o.tier} scope="col">
-                  {CONFIG.pricing[o.tier].short}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">Wanted</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~{Math.round(o.wanted)}</td>
-              ))}
-            </tr>
-            <tr>
-              <th scope="row">Takings</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~£{Math.round(o.revenue)}</td>
-              ))}
-            </tr>
-            <tr>
-              <th scope="row">Not on shelf</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~{Math.round(o.unmet)}</td>
-              ))}
-            </tr>
-            <tr>
-              <th scope="row">Binned (cost)</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~£{Math.round(o.waste)}</td>
-              ))}
-            </tr>
-            <tr>
-              <th scope="row">Gross profit after waste</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~£{Math.round(o.grossProfit - o.waste)}</td>
-              ))}
-            </tr>
-            <tr>
-              <th scope="row">Left after</th>
-              {opts.map((o) => (
-                <td key={o.tier}>~{Math.round(o.leftover)}</td>
-              ))}
-            </tr>
-            {opts.some((o) => o.shortDatedLeft >= 1) && (
-              <tr>
-                <th scope="row">Short-dated left</th>
-                {opts.map((o) => (
-                  <td key={o.tier}>~{Math.round(o.shortDatedLeft)}</td>
-                ))}
-              </tr>
-            )}
-            <tr>
-              <th scope="row">Customer mood</th>
-              {opts.map((o) => (
-                <td key={o.tier}>{o.satisfaction > 0 ? 'better' : o.satisfaction < 0 ? 'worse' : '—'}</td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
-        <p className="tiny muted">
-          Sold = paid at the tills, limited by stock, shelf-filling and checkout. Fuller baskets take longer to scan. Quality is the same at every price. Estimates use the
-          forecast; real footfall varies.
-        </p>
-      </details>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Staff list, actions
-// ---------------------------------------------------------------------------
-
-function actionShortLabel(a: ActionRequest): string {
-  switch (a.kind) {
-    case 'markdown':
-      return 'Mark down';
-    case 'promotion':
-      return 'Promote';
-    case 'emergency':
-      return 'Rush delivery';
-    case 'nextDelivery':
-      return 'Add to the next delivery';
-    case 'hire':
-      return `Hire ${a.person.name}`;
-    case 'letGo':
-      return 'Let go';
-    case 'cashAndCarry':
-      return `Cash-and-carry: send ${ROSTER.find((r) => r.id === a.staffId)?.name ?? 'someone'}`;
-    case 'letRunOut':
-      return 'Let it run out';
-    case 'temp':
-      return 'Book temp';
-    case 'repair':
-      return 'Call engineer';
-  }
-}
 
 function ActionList({
   state,

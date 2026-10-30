@@ -1071,7 +1071,17 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       dept[d].replenishCapacity += replCap[d] * stepShare;
     }
 
-    // 1. Receive deliveries into the stockroom (chilled first: cold chain).
+    // 1. Deliveries unload themselves into the stockroom, as far as it has room.
+    for (const d of DEPTS) {
+      const st = state.stock[d];
+      const n = Math.min(S.total(st.dock), Math.max(0, backroomCapacity(state, d) - S.total(st.backroom)));
+      if (n > 1e-9) {
+        S.add(st.backroom, S.take(st.dock, n));
+        stepWork.received += n;
+        dept[d].received += n;
+      }
+    }
+    // Anyone still on the dock helps with what didn't fit (chilled first: cold chain).
     let rcap = receiveCap * stepShare;
     for (const d of ['chilled', 'produce', 'ambient'] as DeptId[]) {
       const st = state.stock[d];

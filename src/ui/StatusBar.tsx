@@ -19,8 +19,6 @@ interface Props {
 
 export interface CampaignStatus {
   day: string;
-  reputation: number;
-  teamWellbeing: number;
 }
 
 export function Brand({ small }: { small?: boolean }) {
@@ -49,11 +47,6 @@ const EXPLAIN: Record<StatKey, string> = {
   value: 'Cash, plus stock at what it cost, plus equipment at what you paid, minus anything owed.',
 };
 
-const CAMPAIGN_EXPLAIN: Partial<Record<StatKey, string>> = {
-  satisfaction: 'The shop’s reputation. Each day moves it part of the way towards how customers felt that day; it sets how many come in.',
-  wellbeing: 'The team over recent days. Overnight rest restores energy, but long days without breaks build up and show here.',
-  profit: 'Takings minus the cost of goods sold, waste, wages and other costs so far today. Unsold stock is not a cost.',
-};
 
 function Indicator({
   k,
@@ -171,32 +164,7 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
               onToggle={() => toggle('profit')}
             />
           )}
-          {campaign ? (
-            <>
-              <Indicator
-                k="satisfaction"
-                label="Reputation"
-                value={`${Math.round(campaign.reputation)}`}
-                target=""
-                ok={null}
-                status={`Today so far: ${Math.round(satisfactionSoFar(state))}`}
-                explain={CAMPAIGN_EXPLAIN.satisfaction}
-                open={open === 'satisfaction'}
-                onToggle={() => toggle('satisfaction')}
-              />
-              <Indicator
-                k="wellbeing"
-                label="Team"
-                value={`${Math.round(campaign.teamWellbeing)}`}
-                target=""
-                ok={null}
-                status={`Today so far: ${Math.round(wellbeing(state))}`}
-                explain={CAMPAIGN_EXPLAIN.wellbeing}
-                open={open === 'wellbeing'}
-                onToggle={() => toggle('wellbeing')}
-              />
-            </>
-          ) : (
+          {campaign ? null : (
             <>
           <Indicator
             k="satisfaction"

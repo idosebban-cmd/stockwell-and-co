@@ -39,6 +39,8 @@ export interface Live {
   breakUntil: Record<string, number>;
   /** The job each person on a break or a floor job goes back to. */
   returnTo: Record<string, AssignmentId>;
+  /** Called back from a break: no automatic break before this step. */
+  hold?: Record<string, number>;
 }
 
 /** Steps since opening (one step is one minute). */
@@ -102,7 +104,80 @@ function settle(live: Live): Live {
       } else if (now >= breakUntil[s.id]) goBack(s.id);
     } else if (a === 'task' && !state.floor?.tasks.some((t) => t.assigned === s.id)) goBack(s.id);
   }
-  return plan === live.plan && breakUntil === live.breakUntil ? live : { ...live, plan, breakUntil, returnTo };
+  const out = plan === live.plan && breakUntil === live.breakUntil ? live : { ...live, plan, breakUntil, returnTo };
+  return routine(out);
+}
+
+const AUTO = C.live.auto;
+
+/** How much a shelf needs filling (share of it empty), or 0 when there is nothing in the stockroom to fill it with. */
+export function shelfNeed(state: SimState, d: DeptId): number {
+  if (!state.ctx.depts.includes(d) || S.total(state.stock[d].backroom) < 1) return 0;
+  const cap = Math.max(1, state.ctx.shelfCap[d]);
+  return Math.max(0, 1 - S.total(state.stock[d].shelf) / cap);
+}
+
+/** The shop is busy: a long queue for the tills that are open, or a burst of shoppers coming in. */
+function isBusy(state: SimState, plan: HourPlan): boolean {
+  const now = stepOf(state);
+  const tills = Math.max(1, count(plan, 'tills'));
+  if (state.queue.customers > AUTO.busyQueuePerTill * tills) return true;
+  return !!state.floor?.bursts.some((b) => now >= b.warnAt && now < b.at + b.minutes);
+}
+
+/**
+ * Routine jobs, every few minutes: people with nothing left to fill (or on an empty dock) move to the shelf
+ * that needs it most, and the most tired person takes a break when nobody else is on one and the shop is calm.
+ * Deterministic in the state, so a replayed day makes the same moves.
+ */
+function routine(live: Live): Live {
+  const { state } = live;
+  const now = stepOf(state);
+  if (now % AUTO.everyMinutes !== 0 || isClosed(live) || state.floor?.pending) return live;
+  const plan = { ...live.plan, assignments: { ...live.plan.assignments } };
+  let changed = false;
+  const staff = onShift(state).filter((s) => !s.isTemp && !isAway(state, s.id));
+  const need = Object.fromEntries(DEPTS.map((d) => [d, shelfNeed(state, d)])) as Record<DeptId, number>;
+  for (const s of staff) {
+    const a = plan.assignments[s.id];
+    const filling = a?.startsWith('replenish:') ? (a.split(':')[1] as DeptId) : null;
+    if (!(a === 'receive' || (filling && need[filling] < AUTO.doneBelow))) continue;
+    const best = DEPTS.filter((d) => need[d] >= AUTO.moveAbove && d !== filling && count(plan, `replenish:${d}` as AssignmentId, s.id) < assignmentLimit(`replenish:${d}` as AssignmentId, state)).sort(
+      (x, y) => need[y] - need[x],
+    )[0];
+    if (best) {
+      plan.assignments[s.id] = `replenish:${best}` as AssignmentId;
+      changed = true;
+    } else if (a === 'receive') {
+      // Nothing needs filling: lend a hand at the tills.
+      if (count(plan, 'tills', s.id) < assignmentLimit('tills', state)) {
+        plan.assignments[s.id] = 'tills';
+        changed = true;
+      }
+    }
+  }
+  let breakUntil = live.breakUntil;
+  let returnTo = live.returnTo;
+  if (count(plan, 'break') === 0 && !isBusy(state, plan)) {
+    const tired = staff
+      .filter((s) => s.energy < AUTO.breakBelow && plan.assignments[s.id] !== 'task' && plan.assignments[s.id] !== 'break' && (live.hold?.[s.id] ?? -1) <= now)
+      .sort((x, y) => x.energy - y.energy || x.id.localeCompare(y.id))[0];
+    if (tired && assignmentLimit('break', state) > 0) {
+      const was = plan.assignments[tired.id];
+      // The last person on the tills hands over to the liveliest filler first.
+      if (was === 'tills' && count(plan, 'tills', tired.id) === 0) {
+        const cover = staff
+          .filter((s) => s.id !== tired.id && plan.assignments[s.id]?.startsWith('replenish:'))
+          .sort((x, y) => y.energy - x.energy || x.id.localeCompare(y.id))[0];
+        if (cover) plan.assignments[cover.id] = 'tills';
+      }
+      plan.assignments[tired.id] = 'break';
+      breakUntil = { ...breakUntil, [tired.id]: now + BREAK_STEPS };
+      returnTo = { ...returnTo, [tired.id]: was };
+      changed = true;
+    }
+  }
+  return changed ? { ...live, plan, breakUntil, returnTo } : live;
 }
 
 /** Raises the next question if its minute has come. */
@@ -302,7 +377,8 @@ export function advance(input: Live, minutes: number): { live: Live; reports: Ho
     const nextArrival = live.state.staff.reduce((m, s) => (s.availableFromStep !== undefined && s.availableFromStep > now ? Math.min(m, s.availableFromStep) : m), Infinity);
     // While someone is on a floor job, go a minute at a time so they head back the minute it's done.
     const working = live.state.floor?.tasks.some((t) => t.assigned !== null) ? 1 : Infinity;
-    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now, nextEvent - now, nextArrival - now, working));
+    const nextCheck = AUTO.everyMinutes - (now % AUTO.everyMinutes);
+    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now, nextEvent - now, nextArrival - now, working, nextCheck));
     const r = runSteps(live.state, live.plan, n);
     reports.push(r.report);
     live = raiseDue(settle({ ...live, state: r.state }));
@@ -358,6 +434,7 @@ export function choose(input: Live, c: Choice): Live {
       for (const t of live.state.floor?.tasks ?? []) if (t.kind === 'errand' && t.assigned) plan.assignments[t.assigned] = 'task';
       const breakUntil = { ...live.breakUntil };
       const returnTo = { ...live.returnTo };
+      const hold = { ...live.hold };
       let state = live.state;
       for (const s of onShift(live.state)) {
         const was = live.plan.assignments[s.id];
@@ -368,6 +445,7 @@ export function choose(input: Live, c: Choice): Live {
         } else if (now !== 'break' && now !== 'task') {
           delete breakUntil[s.id];
           delete returnTo[s.id];
+          if (was === 'break') hold[s.id] = stepOf(live.state) + AUTO.holdMinutes;
         }
         // Leaving a floor job leaves it for someone else.
         if (was === 'task' && now !== 'task' && state.floor?.tasks.some((t) => t.assigned === s.id)) {
@@ -378,7 +456,7 @@ export function choose(input: Live, c: Choice): Live {
       for (const a of new Set(Object.values(plan.assignments))) {
         if (count(plan, a) > assignmentLimit(a, live.state)) throw new Error('Too many people in one place.');
       }
-      return settle({ ...live, state, plan, breakUntil, returnTo });
+      return settle({ ...live, state, plan, breakUntil, returnTo, hold });
     }
     case 'prices':
       if (!live.state.ctx.pricing && DEPTS.some((d) => c.pricing[d] !== live.plan.pricing[d])) throw new Error('Prices can’t be changed yet.');

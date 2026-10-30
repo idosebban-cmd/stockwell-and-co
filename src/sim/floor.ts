@@ -81,7 +81,8 @@ export function makeFloor(seed: number, ctx: DayContext, forecast: readonly numb
   // Questions: spread through the day, each kind at most once.
   const E = F.events;
   const count = Math.min(E.maxPerDay, Math.max(1, Math.round(ctx.hours * E.perHour)));
-  const pool: FloorEventKind[] = ['breakRequest', 'favour', 'nearDate', 'complaint', 'donation'];
+  // Breaks are taken automatically and stock arrives by itself, so no break requests or wholesaler calls.
+  const pool: FloorEventKind[] = ['favour', 'complaint', 'donation'];
   let last = E.firstAfterMinutes - E.minGapMinutes;
   for (let i = 0; i < count && pool.length; i++) {
     const earliest = last + E.minGapMinutes;

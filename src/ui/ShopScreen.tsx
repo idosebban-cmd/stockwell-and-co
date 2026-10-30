@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CONFIG, DEPTS, hourLabel, type DeptId } from '../sim/config';
+import { CONFIG, DEPTS, hourLabel } from '../sim/config';
 import { STEP_MINUTES, assignmentLimit, clockLabel, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
-import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, runOutWarnings, type Outlook } from '../sim/insight';
-import { incomingFor } from '../sim/restock';
+import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
-import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type StoreStockroom, type ShopNotice, type StoreView, type ZoneId } from './Store';
+import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
 import { liveBrowsing } from './shopperLayout';
-import type { LessonFocus } from '../sim/tutorial';
+import type { ZoneId as Zone } from './Store';
+
+/** Places and people to highlight. */
+export interface LessonFocus {
+  staff: string[];
+  zones: Zone[];
+}
 
 /** What the one contextual panel is showing. Opening something replaces what was there. */
 export type Selection =
@@ -117,8 +122,8 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
 
   // A lesson's price comparison opens with the lesson.
   useEffect(() => {
-    if (focus?.priceDept && planning) setSelState({ kind: 'zone', zone: focus.priceDept });
-  }, [focus?.priceDept, planning]);
+    if (planning) setSelState((x) => x);
+  }, [planning]);
   useEffect(() => {
     if (!planning) {
       setSelState(null);
@@ -281,22 +286,6 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
   }, [jobHints, focus, plan, selectedId, lessonTarget]);
 
   const selectedStaff = state.staff.find((s) => s.id === selectedId);
-  // Live play: the stockroom opens the ordering panel.
-  const stockroom = useMemo<StoreStockroom | undefined>(() => {
-    if (!live) return undefined;
-    const warnings = runOutWarnings(state);
-    const tags: Partial<Record<DeptId, string>> = {};
-    for (const d of state.ctx.depts) {
-      const inc = incomingFor(state, d);
-      if (inc.length) tags[d] = inc[0].label;
-    }
-    return {
-      onOpen: () => setSel(sel?.kind === 'stockroom' ? null : { kind: 'stockroom' }),
-      open: sel?.kind === 'stockroom',
-      alert: warnings.some((w) => w.minutes <= 20) ? 'urgent' : warnings.length ? 'warn' : null,
-      tags,
-    };
-  }, [live, state, sel, setSel]);
   const ctx: PanelContext = { sel, setSel, step, onPlanChange, summary, dismissSummary };
   const replayClock = phase === 'replay' && report ? built.view.clock : null;
 
@@ -321,7 +310,6 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             pops={pops}
             floor={floor}
             onTask={onAssignTask && interactive ? onTask : undefined}
-            stockroom={stockroom}
             office={office && live ? { onOpen: () => setSel(sel?.kind === 'office' ? null : { kind: 'office' }), open: sel?.kind === 'office' } : undefined}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}

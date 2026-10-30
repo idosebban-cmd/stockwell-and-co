@@ -1,58 +1,24 @@
 import { Shopper, StaffFigure } from './art/Characters';
 
 /** First screen: the shopfront, one sentence and the ways in. */
-export function Opening({
-  week,
-  onWeek,
-  onQuick,
-  quickInProgress,
-  onCustom,
-  onLearn,
-  notice,
-  onDismissNotice,
-}: {
-  /** "Open the shop" or the day to continue. */
-  week: { label: string; continuing: boolean };
-  onWeek: () => void;
-  onQuick: () => void;
-  quickInProgress: boolean;
-  onCustom: () => void;
-  onLearn: () => void;
-  notice: string | null;
-  onDismissNotice: () => void;
-}) {
+export function Opening({ label, onPlay, notice, onDismissNotice }: { label: string; onPlay: () => void; notice: string | null; onDismissNotice: () => void }) {
   return (
     <main className="opening" id="main">
       <Shopfront />
       <div className="opening-copy">
         <h1>Stockwell &amp; Co</h1>
-        <p className="opening-line">
-          Take over a little corner shop and run it at your own pace, day after day. Keep the shelves full and the queues short, look after the team, and
-          grow the business as you go. Pause whenever you like.
-        </p>
+        <p className="opening-line">Run a silly little shop!</p>
         {notice && (
           <p className="opening-notice" role="status">
             {notice}{' '}
-            <button type="button" className="btn-link" onClick={onDismissNotice}>
+            <button type="button" className="btn-secondary" onClick={onDismissNotice}>
               OK
             </button>
           </p>
         )}
         <div className="opening-buttons">
-          <button type="button" className="btn-primary btn-start" onClick={onWeek} autoFocus>
-            {week.label}
-          </button>
-          <button type="button" className="btn-secondary btn-start-2" onClick={onQuick}>
-            {quickInProgress ? 'Continue Quick play' : 'Quick play: one Saturday'}
-          </button>
-        </div>
-        <p className="tiny muted">The shop teaches as it goes. Prefer a guided start?</p>
-        <div className="opening-links">
-          <button type="button" className="btn-link" onClick={onLearn}>
-            Learn to play (five short lessons)
-          </button>
-          <button type="button" className="btn-link" onClick={onCustom}>
-            Quick play with a custom order
+          <button type="button" className="btn-primary btn-start" onClick={onPlay} autoFocus>
+            {label}
           </button>
         </div>
       </div>

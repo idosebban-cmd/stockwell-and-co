@@ -26,7 +26,7 @@ import {
   type CampaignRecord,
   type CampaignState,
 } from './campaign';
-import { noReplenishment, planInvest, playCampaign, playLiveDay, sensible, type Strategy } from './bots';
+import { planInvest, playCampaign, playLiveDay, sensible, type Strategy } from './bots';
 import * as S from './stock';
 import type { SimState } from './types';
 
@@ -145,14 +145,13 @@ describe('locks and installed equipment', () => {
     expect(checkSetup(order, state.scenario.forecast, { cash: c.cash, carried: carriedQty(c), ctx: dayContext(c) }).errors.join(' ')).toMatch(/doesn't have/);
     expect(state.stock.chilled.shelf.length + state.stock.chilled.backroom.length).toBe(0);
   });
-  it('prices are fixed on the first two days and open from Tuesday', () => {
-    const c = newCampaign(1);
-    const state = startCampaignDay(c, recommendOrder(c));
-    const plan = defaultPlan(state);
-    expect(planErrors(state, { ...plan, pricing: { ...plan.pricing, produce: 'high' } }).join(' ')).toMatch(/Prices/);
-    expect(K.unlocks.pricing).toBe(2);
-    const tue = startCampaignDay({ ...c, day: 2 }, recommendOrder({ ...c, day: 2 }));
-    expect(planErrors(tue, { ...defaultPlan(tue), pricing: { ...plan.pricing, produce: 'high' } })).toEqual([]);
+  it('prices are fixed, every day', () => {
+    for (const day of [0, 2, 9]) {
+      const c = { ...newCampaign(1), day };
+      const state = startCampaignDay(c, recommendOrder(c));
+      const plan = defaultPlan(state);
+      expect(planErrors(state, { ...plan, pricing: { ...plan.pricing, produce: 'high' } }).join(' ')).toMatch(/Prices/);
+    }
   });
   it('purchases persist and show in the shop the next day', () => {
     let c = newCampaign(1);
@@ -307,8 +306,8 @@ describe('day after day', () => {
     expect(w.camp.day).toBe(WEEK_DAYS + 2);
     const nextSunday = dayContext({ ...w.camp, day: WEEK_DAYS });
     expect(nextSunday.weekday).toBe(0);
-    expect(nextSunday.pricing).toBe(true);
-    expect(nextSunday.actions).toContain('emergency');
+    expect(nextSunday.pricing).toBe(false);
+    expect(nextSunday.actions).toEqual(['hire', 'letGo']);
     const sum = (day: number) => dayScenario({ ...w.camp, day, reputation: 70 }).forecast.reduce((t, x) => t + x, 0);
     expect(sum(WEEK_DAYS)).toBeGreaterThan(sum(0));
   });
@@ -316,13 +315,6 @@ describe('day after day', () => {
     const c = newCampaign(1);
     expect(dayContext(c).patienceBonus).toBe(K.generous.patienceBonusMinutes);
     expect(dayContext({ ...c, day: K.generous.days }).patienceBonus).toBe(0);
-  });
-  it('a poor first two days can be recovered from', () => {
-    const weak: Strategy = (s) => (s.ctx.weekday <= 1 ? noReplenishment(s) : sensible(s));
-    const w = playCampaign(1, weak, planInvest({ 2: ['hire:bev'], 3: ['shelfProduce'] }));
-    const strong = playCampaign(1, sensible, planInvest({ 2: ['hire:bev'], 3: ['shelfProduce'] }));
-    expect(w.days[1].result.profit).toBeLessThan(strong.days[1].result.profit);
-    expect(businessValue(w.camp).total).toBeGreaterThan(w.camp.startValue);
   });
   it('investing makes later days better (shorter queues or better availability), not cancelled out', () => {
     const base = playCampaign(1, sensible, () => []);
@@ -333,31 +325,22 @@ describe('day after day', () => {
   });
 });
 
-describe('till float', () => {
-  it('the morning order never spends the float', () => {
-    for (const cash of [2000, 600, K.tillFloat + 40, K.tillFloat, 60, -200]) {
-      const c: CampaignState = { ...newCampaign(1), cash };
-      expect(orderFunds(c)).toBeCloseTo(Math.max(0, cash - K.tillFloat), 9);
-      const order = recommendOrder(c);
-      const state = startCampaignDay(c, order);
-      expect(state.credit ?? 0).toBe(0);
-      if (cash >= K.tillFloat) expect(state.cash).toBeGreaterThanOrEqual(K.tillFloat - 1e-6);
-      else expect(state.cash).toBeCloseTo(cash, 9);
-    }
-    // An order that would dip into the float is refused.
-    const c: CampaignState = { ...newCampaign(1), cash: K.tillFloat + 10 };
-    const big = recommendOrder({ ...c, cash: 5000 });
-    expect(() => startCampaignDay(c, big)).toThrow();
+describe('stock arrives by itself', () => {
+  it('the morning stock always comes, even with no cash, and the shop recovers', () => {
+    let c: CampaignState = { ...newCampaign(1), cash: -300 };
+    const order = recommendOrder(c);
+    expect(DEPTS.some((d) => order.orders[d].morning > 0)).toBe(true);
+    const state = startCampaignDay(c, order);
+    expect(state.cash).toBeLessThan(-300);
+    for (let i = 0; i < 3; i++) ({ camp: c } = playDay(c));
+    expect(c.cash).toBeGreaterThan(0);
   });
-  it('upgrades can’t spend the float', () => {
-    const base = newCampaign(1);
-    const cost = allOffers({ ...base, day: 1 }).find((o) => o.id === 'till3')!.cost;
-    const c: CampaignState = { ...base, day: 1, cash: cost + K.tillFloat - 1 };
-    const o = allOffers(c).find((x) => x.id === 'till3')!;
-    expect(o.available).toBe(false);
-    expect(o.reason).toMatch(/stays in the till/);
-    expect(spendable(c)).toBeLessThan(cost);
-    expect(allOffers({ ...c, cash: cost + K.tillFloat }).find((x) => x.id === 'till3')!.available).toBe(true);
+  it('upgrades are bought with cash', () => {
+    const base = { ...newCampaign(1), day: 1 };
+    const cost = allOffers(base).find((o) => o.id === 'till3')!.cost;
+    expect(allOffers({ ...base, cash: cost - 1 }).find((x) => x.id === 'till3')!.available).toBe(false);
+    expect(allOffers({ ...base, cash: cost }).find((x) => x.id === 'till3')!.available).toBe(true);
+    expect(spendable({ ...base, cash: -50 })).toBe(0);
   });
   it('a save that still owes the wholesaler pays it off from takings, and it counts against business value', () => {
     const owing: CampaignState = { ...newCampaign(1), credit: 120 };
