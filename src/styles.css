@@ -3771,7 +3771,8 @@ ul.tannoy {
   gap: 4px;
 }
 .stage-chip.stage-paused {
-  top: 10px;
+  /* On the walkway between the aisles and the tills, clear of the stockroom, dock and their markers. */
+  top: 61%;
   bottom: auto;
   left: 50%;
   width: auto;
@@ -3884,4 +3885,92 @@ ul.tannoy {
   stroke: var(--mustard);
   stroke-width: 3;
   stroke-dasharray: 8 5;
+}
+
+/* Stockroom: ordering during the day */
+.stockroom-card .sr-dept {
+  border-top: 1px solid var(--line);
+  padding: 10px 0 12px;
+}
+.stockroom-card .sr-dept h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  color: var(--burgundy-dark);
+}
+.sr-stock,
+.sr-lasts,
+.sr-quote,
+.sr-blurb {
+  margin: 2px 0;
+}
+.sr-lasts {
+  font-weight: 800;
+}
+.sr-lasts.calm,
+.calm {
+  color: var(--good);
+}
+.sr-lasts.bad {
+  color: var(--bad);
+}
+.sr-incoming {
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sr-incoming li {
+  background: #e9f2e7;
+  border: 1px solid var(--good);
+  border-radius: 8px;
+  padding: 1px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.sr-options {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 2px;
+  flex-wrap: wrap;
+}
+.sr-option {
+  flex: 1 1 auto;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 2px solid var(--line-strong);
+  background: var(--paper);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.sr-option[aria-pressed='true'] {
+  background: var(--burgundy);
+  border-color: var(--burgundy-dark);
+  color: #fff;
+}
+.sr-qty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  flex-wrap: wrap;
+}
+.sr-who {
+  display: block;
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+.sr-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.sr-confirm {
+  padding: 6px 14px;
 }

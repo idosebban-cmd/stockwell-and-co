@@ -62,6 +62,12 @@ export function Help({ onClose }: { onClose: () => void }) {
           <li>Drag a person to a place to give them that job; they walk over and start straight away. (Or click a person, then a place.) Moving someone to a full place swaps them with the person there.</li>
           <li>Send people to the break room: a break lasts half an hour, then they go back to what they were doing.</li>
           <li>
+            <strong>Running low?</strong> Click the stockroom. Each department shows how long its stock will last at today’s forecast and what’s on its way, and
+            you can order more: a <strong>rush delivery</strong> (dearer, on the dock in about 20 minutes), a <strong>cash-and-carry run</strong> (send someone for half
+            an hour; they bring a car-load straight into the stockroom) or the <strong>next delivery</strong> (normal price; tomorrow morning if there’s none left
+            today). Deliveries land on the dock and need unloading. A good morning order is still the cheapest way to stock the day.
+          </li>
+          <li>
             <strong>Floor jobs</strong> pop up as a red “!” where they happen: a spill, a shopper who can’t find something, a price check, a cage in the aisle, baskets
             running out. Customers nearby get grumpier until someone sorts it: drag a person onto the “!”. It takes a minute or three, then they go back to their job.
           </li>

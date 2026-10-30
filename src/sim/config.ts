@@ -338,20 +338,35 @@ export const CONFIG = {
       durationHours: 2,
       maxPerDay: 2,
     },
-    /** Rush delivery from the wholesaler: dearer, on the dock (to unload) this many minutes after ordering. */
+    /**
+     * Ordering during the day (the stockroom panel). Quantities go in steps of `step`.
+     * Rush delivery: from the wholesaler, dearer per item plus a fee, on the dock (to unload) about
+     * `arrivalMinutes` after ordering. Priced so a good morning order is clearly cheaper: at ×1.6 plus £25
+     * a rush of 120 fruit & veg costs £125 against £62 in the morning order.
+     */
     emergency: {
+      /** The amount the stepper starts at when there's no better suggestion. */
       qty: 120,
-      costMult: 1.5,
+      maxQty: 300,
+      step: 20,
+      costMult: 1.6,
       deliveryFee: 25,
       arrivalMinutes: 20,
       maxPerDay: 2,
     },
-    /** Send someone to the cash-and-carry: away for `minutes`, back with a small amount straight into the stockroom. */
+    /** Send someone to the cash-and-carry: away for `minutes`, back with up to `maxQty` items (what fits in the car) straight into the stockroom. */
     cashAndCarry: {
       qty: 60,
+      maxQty: 80,
+      step: 10,
       costMult: 1.25,
       minutes: 30,
       maxPerDay: 2,
+    },
+    /** Add to the next scheduled delivery: today's midday lorry if it hasn't come yet, otherwise tomorrow morning (on the dock at opening). Normal prices. */
+    nextDelivery: {
+      maxQty: 600,
+      step: 20,
     },
     /** Warn when a department's stock (shelf, stockroom, dock and deliveries due) will run out within this many minutes at the forecast rate. */
     runOutWarnMinutes: 45,
@@ -392,7 +407,7 @@ export const CONFIG = {
     /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */
     unlocks: {
       pricing: 2,
-      actions: { emergency: 0, cashAndCarry: 0, letRunOut: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
+      actions: { emergency: 0, cashAndCarry: 0, nextDelivery: 0, letRunOut: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
     },
     /**
      * The first days forgive mistakes rather than lowering the activity: shoppers wait longer before giving up,

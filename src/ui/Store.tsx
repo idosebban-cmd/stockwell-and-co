@@ -130,6 +130,16 @@ interface Props {
   floor?: StoreFloor;
   /** Live play: send someone to a floor job (dropped on it, or the job chosen with them selected). With no one, says what it needs. */
   onTask?: (taskId: string, staffId: string | null) => void;
+  /** Live play: the stockroom opens the ordering panel; it shows orders on their way and a "!" when something will run out. */
+  stockroom?: StoreStockroom;
+}
+
+export interface StoreStockroom {
+  onOpen: () => void;
+  open: boolean;
+  alert: 'urgent' | 'warn' | null;
+  /** "+60 arriving 11:20" per department. */
+  tags: Partial<Record<DeptId, string>>;
 }
 
 export interface StoreFloor {
@@ -366,7 +376,7 @@ function StoreImpl(props: Props) {
       <Walkways aisles={fit.aisles} />
       <BackWalls />
 
-      <Stockroom backroom={view.backroom} detail={detail} depts={fit.depts} />
+      <Stockroom backroom={view.backroom} detail={detail} depts={fit.depts} tags={props.stockroom?.tags} />
       <Dock dock={view.dock} lorry={view.lorry} detail={detail === 'dock'} />
       <Office clock={view.clock} />
       <BreakRoom />
@@ -418,6 +428,28 @@ function StoreImpl(props: Props) {
         );
       })}
 
+      {props.stockroom && interactive && !selected && (
+        <rect
+          className={`zone zone-browse ${props.stockroom.open ? 'zone-context' : ''}`}
+          x="12"
+          y="12"
+          width="376"
+          height="134"
+          rx="10"
+          tabIndex={0}
+          role="button"
+          aria-pressed={props.stockroom.open}
+          aria-label={`Stockroom: order more stock${props.stockroom.alert ? ', something will run out soon' : ''}. Open.`}
+          onClick={props.stockroom.onOpen}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              props.stockroom!.onOpen();
+            }
+          }}
+        />
+      )}
+      {props.stockroom?.alert && !selected && <ProblemMark x={370} y={28} level={props.stockroom.alert} label="Stockroom" onOpen={interactive ? props.stockroom.onOpen : undefined} />}
       <Notices notices={view.notices} onOpen={interactive ? (z) => onContext(z) : undefined} />
       {!selected &&
         zones.map((zone) =>
@@ -539,7 +571,7 @@ function RoomLabel({ x, y, children }: { x: number; y: number; children: ReactNo
   );
 }
 
-function Stockroom({ backroom, detail, depts }: { backroom: Record<DeptId, number>; detail: ZoneId | null; depts: DeptId[] }) {
+function Stockroom({ backroom, detail, depts, tags }: { backroom: Record<DeptId, number>; detail: ZoneId | null; depts: DeptId[]; tags?: Partial<Record<DeptId, string>> }) {
   const bays = ([
     ['produce', 22, 'Fruit & veg'],
     ['chilled', 144, 'Cold room'],
@@ -566,6 +598,14 @@ function Stockroom({ backroom, detail, depts }: { backroom: Record<DeptId, numbe
               {label}
               {backroom[d] < 1 ? ': none' : detail === d || detail === 'dock' ? `: ${Math.round(backroom[d])}` : ''}
             </text>
+            {tags?.[d] && (
+              <g transform={`translate(${x + 53} 44)`}>
+                <rect x={-Math.max(44, tags[d]!.length * 2.9 + 8)} y="-9" width={Math.max(88, tags[d]!.length * 5.8 + 16)} height="17" rx="8" fill="#e9f2e7" stroke="var(--good)" strokeWidth="1.5" />
+                <text y="4" textAnchor="middle" fontSize="9.5" fontWeight="800" fill="var(--ink)">
+                  {tags[d]}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}

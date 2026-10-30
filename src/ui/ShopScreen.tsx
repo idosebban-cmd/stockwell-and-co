@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CONFIG, DEPTS, hourLabel } from '../sim/config';
+import { CONFIG, DEPTS, hourLabel, type DeptId } from '../sim/config';
 import { STEP_MINUTES, assignmentLimit, clockLabel, deptUnits, markdownActive, onShift, perDept, promotionActive, shelfCapacity } from '../sim/engine';
-import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
+import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, runOutWarnings, type Outlook } from '../sim/insight';
+import { incomingFor } from '../sim/restock';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
-import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type ShopNotice, type StoreView, type ZoneId } from './Store';
+import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type StoreStockroom, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
 import { liveBrowsing } from './shopperLayout';
 import type { LessonFocus } from '../sim/tutorial';
@@ -17,6 +18,7 @@ export type Selection =
   | { kind: 'team' }
   | { kind: 'forecast' }
   | { kind: 'outlook' }
+  | { kind: 'stockroom' }
   | null;
 
 export interface PanelContext {
@@ -276,6 +278,22 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
   }, [jobHints, focus, plan, selectedId, lessonTarget]);
 
   const selectedStaff = state.staff.find((s) => s.id === selectedId);
+  // Live play: the stockroom opens the ordering panel.
+  const stockroom = useMemo<StoreStockroom | undefined>(() => {
+    if (!live) return undefined;
+    const warnings = runOutWarnings(state);
+    const tags: Partial<Record<DeptId, string>> = {};
+    for (const d of state.ctx.depts) {
+      const inc = incomingFor(state, d);
+      if (inc.length) tags[d] = inc[0].label;
+    }
+    return {
+      onOpen: () => setSel(sel?.kind === 'stockroom' ? null : { kind: 'stockroom' }),
+      open: sel?.kind === 'stockroom',
+      alert: warnings.some((w) => w.minutes <= 20) ? 'urgent' : warnings.length ? 'warn' : null,
+      tags,
+    };
+  }, [live, state, sel, setSel]);
   const ctx: PanelContext = { sel, setSel, step, onPlanChange, summary, dismissSummary };
   const replayClock = phase === 'replay' && report ? built.view.clock : null;
 
@@ -300,6 +318,7 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             pops={pops}
             floor={floor}
             onTask={onAssignTask && interactive ? onTask : undefined}
+            stockroom={stockroom}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}
             highlightStaff={lessonTarget.staff}

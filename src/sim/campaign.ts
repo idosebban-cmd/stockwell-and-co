@@ -362,6 +362,8 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
   const H = C.calendar.hoursPerDay;
   const shift = (bs: Batch[]) => bs.filter((b) => b.qty > 1e-9).map((b) => ({ ...b, expiresAt: b.expiresAt === null ? null : b.expiresAt - H }));
   const stock = perDept((d) => ({ shelf: shift(state.stock[d].shelf), backroom: shift(state.stock[d].backroom), dock: shift(state.stock[d].dock) }));
+  // Ordered during the day for tomorrow: on the dock at opening, dated from tomorrow.
+  for (const o of state.tomorrow ?? []) S.add(stock[o.dept].dock, datedBatches(o.dept, o.qty, o.unitCost, o.life, camp.day + 1));
   const staff = camp.staff.map((cs) => {
     const s = state.staff.find((x) => x.id === cs.id);
     return { id: cs.id, fatigue: cs.fatigue * K.fatigue.carry + (s?.strain ?? 0) };

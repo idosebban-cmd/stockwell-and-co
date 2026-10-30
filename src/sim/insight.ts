@@ -7,6 +7,7 @@
  * (no hidden variation, no unannounced events), so it is an estimate, never
  * a promise. Outcomes read recorded results only.
  */
+import { stockOutlook } from './restock';
 import { BURST_TEXT, burstAtDoor, taskLabel, taskText } from './floor';
 import { CONFIG, DEPTS, PRICE_TIERS, deptName, type DeptId, type PriceTier } from './config';
 import {
@@ -289,6 +290,21 @@ export interface Problem {
   title: string;
   /** Floor jobs and bursts have their own markers in the shop. */
   floor?: boolean;
+  /** Opens the stockroom (ordering) rather than the place. */
+  stockroom?: boolean;
+}
+
+/** Departments that will run out (at the forecast) within `actions.runOutWarnMinutes`, unless the player has accepted it. */
+export function runOutWarnings(state: SimState): { dept: DeptId; at: number; minutes: number }[] {
+  const t = state.hour * STEPS + (state.step ?? 0);
+  if (state.hour >= state.ctx.hours) return [];
+  const out: { dept: DeptId; at: number; minutes: number }[] = [];
+  for (const d of state.ctx.depts) {
+    if (state.floor?.letRunOut?.includes(d)) continue;
+    const o = stockOutlook(state, d);
+    if (o.runsOutAt !== null && o.runsOutAt - t <= C.actions.runOutWarnMinutes) out.push({ dept: d, at: o.runsOutAt, minutes: o.runsOutAt - t });
+  }
+  return out;
 }
 
 export function problems(state: SimState, plan: HourPlan, look: Outlook | null = outlook(state, plan)): Problem[] {
@@ -303,6 +319,14 @@ export function problems(state: SimState, plan: HourPlan, look: Outlook | null =
     if (row.status === 'short') out.push({ zone: row.zone, level: 'warn', title: row.zone === 'tills' ? 'Queue likely to overflow' : `${row.label} likely to run short` });
   }
   if (look?.tired.length) out.push({ zone: 'break', level: 'warn', title: `Tired: ${look.tired.map((t) => t.name).join(', ')}` });
+  for (const w of runOutWarnings(state)) {
+    out.push({
+      zone: w.dept,
+      level: w.minutes <= 20 ? 'urgent' : 'warn',
+      title: `${deptName(w.dept)} runs out ~${clockLabel(Math.floor(w.at / STEPS), w.at % STEPS)}: order more in the stockroom`,
+      stockroom: true,
+    });
+  }
   const door = burstAtDoor(state.floor, state.hour * STEPS + (state.step ?? 0));
   if (door && door.inMinutes > 0) out.push({ zone: 'tills', level: 'urgent', title: `${BURST_TEXT[door.burst.kind].cue}: about ${door.burst.shoppers} shoppers in ${door.inMinutes} min`, floor: true });
   for (const t of state.floor?.tasks ?? []) {

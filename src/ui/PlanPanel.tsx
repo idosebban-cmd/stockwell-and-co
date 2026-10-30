@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { CONFIG, DEPTS, deptName, hourLabel, hourRange, type DeptId, type PriceTier } from '../sim/config';
 import {
   STEP_MINUTES,
+  clockLabel,
   actionKey,
   assignmentLimit,
   backroomCapacity,
@@ -16,6 +17,7 @@ import {
 } from '../sim/engine';
 import { previewWarnings } from '../sim/explain';
 import {
+  runOutWarnings,
   fridgeFacts,
   jobPreview,
   outlook as computeOutlook,
@@ -31,6 +33,7 @@ import { ASSIGNMENT_LABEL, ROSTER, SPECIALITY_TEXT, TEMP_ENTRY } from '../sim/ro
 import { total } from '../sim/stock';
 import { ASSIGNMENTS, type ActionRequest, type AssignmentId, type HourPlan, type SimState } from '../sim/types';
 import { ZONE_NAME, type ZoneId } from './Store';
+import { StockroomCard } from './StockroomCard';
 import { Forecast } from './Forecast';
 import type { Selection } from './ShopScreen';
 
@@ -90,9 +93,16 @@ export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME
     case 'staff':
       return <StaffCard state={state} plan={plan} onChange={onChange} id={sel.id} onClose={close} />;
     case 'zone':
-      return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} />;
+      return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} onStockroom={() => setSel({ kind: 'stockroom' })} />;
+    case 'stockroom':
+      return (
+        <section className="panel-inner context-card" aria-label="Stockroom">
+          <PanelHead title="Stockroom" kicker="Order more stock" onClose={close} />
+          <StockroomCard state={state} plan={plan} onOrder={(a) => onChange({ ...plan, actions: [...plan.actions, a] })} />
+        </section>
+      );
     case 'attention':
-      return <AttentionPanel state={state} plan={plan} onOpen={open} onClose={close} onOutlook={() => setSel({ kind: 'outlook' })} />;
+      return <AttentionPanel state={state} plan={plan} onOpen={open} onStockroom={() => setSel({ kind: 'stockroom' })} onClose={close} onOutlook={() => setSel({ kind: 'outlook' })} />;
     case 'team':
       return (
         <div className="panel-inner">
@@ -141,7 +151,7 @@ export function attentionItems(state: SimState, plan: HourPlan) {
   return computeProblems(state, plan, look).sort((a, b) => (a.level === b.level ? 0 : a.level === 'urgent' ? -1 : 1));
 }
 
-function AttentionPanel({ state, plan, onOpen, onClose, onOutlook }: { state: SimState; plan: HourPlan; onOpen: (z: ZoneId) => void; onClose: () => void; onOutlook: () => void }) {
+function AttentionPanel({ state, plan, onOpen, onStockroom, onClose, onOutlook }: { state: SimState; plan: HourPlan; onOpen: (z: ZoneId) => void; onStockroom: () => void; onClose: () => void; onOutlook: () => void }) {
   const items = useMemo(() => attentionItems(state, plan), [state, plan]);
   return (
     <div className="panel-inner">
@@ -152,13 +162,13 @@ function AttentionPanel({ state, plan, onOpen, onClose, onOutlook }: { state: Si
         <ul className="attention-list">
           {items.map((p, i) => (
             <li key={`${i}-${p.title}`}>
-              <button type="button" className={`attention-item ${p.level}`} onClick={() => onOpen(p.zone)}>
+              <button type="button" className={`attention-item ${p.level}`} onClick={() => (p.stockroom ? onStockroom() : onOpen(p.zone as ZoneId))}>
                 <span className="att-mark" aria-hidden="true">
                   !
                 </span>
                 <span>
                   <strong>{p.title}</strong>
-                  <span className="att-where">{ZONE_NAME[p.zone]} · see actions</span>
+                  <span className="att-where">{p.stockroom ? 'Stockroom · order more' : `${ZONE_NAME[p.zone as ZoneId]} · see actions`}</span>
                 </span>
                 <span className="sr-only">{p.level === 'urgent' ? ' (urgent)' : ''}</span>
               </button>
@@ -335,6 +345,7 @@ export function ContextCard({
   onClose,
   opts = FULL_GAME,
   onOpen,
+  onStockroom,
 }: {
   state: SimState;
   plan: HourPlan;
@@ -343,14 +354,16 @@ export function ContextCard({
   onClose: () => void;
   opts?: PanelOptions;
   onOpen?: (z: ZoneId) => void;
+  /** Live play: open the stockroom to order more. */
+  onStockroom?: () => void;
 }) {
   return (
     <section className="panel-inner context-card" aria-label={ZONE_NAME[zone]}>
       <PanelHead title={ZONE_NAME[zone]} kicker="Selected" onClose={onClose} />
       {zone === 'chilled' && state.fridge.status === 'fault' && <FridgeCard state={state} plan={plan} onChange={onChange} allowActions={opts.allowActions} />}
-      {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptCard state={state} plan={plan} onChange={onChange} d={zone} opts={opts} onOpen={onOpen} />}
+      {(zone === 'produce' || zone === 'chilled' || zone === 'ambient') && <DeptCard state={state} plan={plan} onChange={onChange} d={zone} opts={opts} onOpen={onOpen} onStockroom={onStockroom} />}
       {zone === 'tills' && <TillCard state={state} plan={plan} onChange={onChange} opts={opts} />}
-      {zone === 'dock' && <DockCard state={state} plan={plan} onChange={onChange} opts={opts} />}
+      {zone === 'dock' && <DockCard state={state} plan={plan} onChange={onChange} opts={opts} onStockroom={onStockroom} />}
       {zone === 'break' && <BreakCard state={state} plan={plan} onChange={onChange} />}
     </section>
   );
@@ -411,7 +424,8 @@ function FridgeCard({ state, plan, onChange, allowActions }: { state: SimState; 
   );
 }
 
-function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId; opts: PanelOptions; onOpen?: (z: ZoneId) => void }) {
+function DeptCard({ state, plan, onChange, d, opts, onOpen, onStockroom }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; d: DeptId; opts: PanelOptions; onOpen?: (z: ZoneId) => void; onStockroom?: () => void }) {
+  const runOut = onStockroom ? runOutWarnings(state).find((w) => w.dept === d) : undefined;
   const u = deptUnits(state, d);
   const cap = shelfCapacity(state, d);
   const job: AssignmentId = `replenish:${d}` as AssignmentId;
@@ -426,13 +440,24 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
   const actions: ActionRequest[] = [];
   if (opts.allowActions) {
     if (CONFIG.departments[d].perishable) actions.push({ kind: 'markdown', dept: d });
-    actions.push({ kind: 'promotion', dept: d }, { kind: 'emergency', dept: d });
-    // Anyone working (not on a break) can be sent to the cash-and-carry for this department.
-    for (const s of onShift(state)) if (!s.isTemp && plan.assignments[s.id] !== 'break' && plan.assignments[s.id] !== 'task') actions.push({ kind: 'cashAndCarry', dept: d, staffId: s.id });
+    actions.push({ kind: 'promotion', dept: d });
+    // Ordering more stock lives in the stockroom panel (live play); the lessons keep the old emergency order.
+    if (!onStockroom) actions.push({ kind: 'emergency', dept: d });
   }
   const allowed = actions.filter((a) => state.ctx.actions.includes(a.kind));
   return (
     <>
+      {runOut && (
+        <div className={`decision ${runOut.minutes <= 20 ? 'urgent' : ''}`}>
+          <p className="decision-title">
+            <span aria-hidden="true">!</span> Runs out ~{clockLabel(Math.floor(runOut.at / CONFIG.stepsPerHour), runOut.at % CONFIG.stepsPerHour)}
+          </p>
+          <p className="tiny">At today’s forecast, counting what’s on its way (estimate).</p>
+          <button type="button" className="btn-action" onClick={onStockroom}>
+            Order more in the stockroom →
+          </button>
+        </div>
+      )}
       {problem && (
         <div className="decision">
           <p className="decision-title">
@@ -443,11 +468,10 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
             <button type="button" className="btn-action" onClick={() => onOpen?.('dock')}>
               Stock is on the dock: unload it first →
             </button>
-          ) : u.backroom < 1 && opts.allowActions ? (
-            <p className="tiny bad">
-              None in the stockroom. Under More actions: a rush delivery (on the dock in {CONFIG.actions.emergency.arrivalMinutes} minutes) or a cash-and-carry run
-              {state.ctx.pricing ? '; or raise the price to make what’s left last' : ''}.
-            </p>
+          ) : u.backroom < 1 && onStockroom && !runOut ? (
+            <button type="button" className="btn-action" onClick={onStockroom}>
+              None in the stockroom: order more →
+            </button>
           ) : null}
         </div>
       )}
@@ -466,7 +490,7 @@ function DeptCard({ state, plan, onChange, d, opts, onOpen }: { state: SimState;
         )}
         {incoming.map((x) => (
           <div key={x.id} className="contents">
-            <dt>Delivery: {hourLabel(x.arrivesAt)}</dt>
+            <dt>Delivery: {clockLabel(Math.floor((x.arrivesAtStep ?? x.arrivesAt * CONFIG.stepsPerHour) / CONFIG.stepsPerHour), (x.arrivesAtStep ?? 0) % CONFIG.stepsPerHour)}</dt>
             <dd>{Math.round(x.qty)}</dd>
           </div>
         ))}
@@ -527,7 +551,7 @@ function TillCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
   );
 }
 
-function DockCard({ state, plan, onChange, opts }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; opts: PanelOptions }) {
+function DockCard({ state, plan, onChange, opts, onStockroom }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; opts: PanelOptions; onStockroom?: () => void }) {
   const waiting = DEPTS.reduce((t, d) => t + deptUnits(state, d).dock, 0);
   const unloaders = onShift(state).filter((s) => plan.assignments[s.id] === 'receive');
   return (
@@ -559,7 +583,7 @@ function DockCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
         })}
         {state.deliveries.map((x) => (
           <div key={x.id} className="contents">
-            <dt>Delivery: {hourLabel(x.arrivesAt)}</dt>
+            <dt>Delivery: {clockLabel(Math.floor((x.arrivesAtStep ?? x.arrivesAt * CONFIG.stepsPerHour) / CONFIG.stepsPerHour), (x.arrivesAtStep ?? 0) % CONFIG.stepsPerHour)}</dt>
             <dd>
               {Math.round(x.qty)} {deptName(x.dept).toLowerCase()}
             </dd>
@@ -567,7 +591,12 @@ function DockCard({ state, plan, onChange, opts }: { state: SimState; plan: Hour
         ))}
       </dl>
       <StaffPicker state={state} plan={plan} onChange={onChange} job="receive" title={unloaders.length ? 'Add another unloader' : 'Put someone on Unload delivery'} compact={waiting < 1} />
-      {opts.allowActions && state.ctx.actions.includes('emergency') && (
+      {opts.allowActions && onStockroom && (
+        <button type="button" className="btn-link" onClick={onStockroom}>
+          Order more stock (stockroom) →
+        </button>
+      )}
+      {opts.allowActions && !onStockroom && state.ctx.actions.includes('emergency') && (
         <details className="more-actions">
           <summary>Emergency orders</summary>
           <ActionList state={state} plan={plan} onChange={onChange} actions={state.ctx.depts.map((d) => ({ kind: 'emergency', dept: d }) as ActionRequest)} label={(a) => ('dept' in a ? deptName(a.dept) : '')} />
@@ -832,6 +861,8 @@ function actionShortLabel(a: ActionRequest): string {
       return 'Promote';
     case 'emergency':
       return 'Rush delivery';
+    case 'nextDelivery':
+      return 'Add to the next delivery';
     case 'cashAndCarry':
       return `Cash-and-carry: send ${ROSTER.find((r) => r.id === a.staffId)?.name ?? 'someone'}`;
     case 'letRunOut':

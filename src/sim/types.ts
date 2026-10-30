@@ -109,8 +109,11 @@ export interface Scenario {
 export type ActionRequest =
   | { kind: 'markdown'; dept: DeptId }
   | { kind: 'promotion'; dept: DeptId }
-  | { kind: 'emergency'; dept: DeptId }
-  | { kind: 'cashAndCarry'; dept: DeptId; staffId: string }
+  /** Rush delivery (`qty` defaults to `actions.emergency.qty`). */
+  | { kind: 'emergency'; dept: DeptId; qty?: number }
+  | { kind: 'cashAndCarry'; dept: DeptId; staffId: string; qty?: number }
+  /** Add to the next scheduled delivery (today's midday lorry, else tomorrow morning). */
+  | { kind: 'nextDelivery'; dept: DeptId; qty: number }
   /** Accept that a department will run out today (no more warnings). */
   | { kind: 'letRunOut'; dept: DeptId }
   | { kind: 'temp' }
@@ -212,6 +215,8 @@ export interface SimState {
   idCounter: number;
   /** Owed to the wholesaler for stock bought on account; repaid from takings. */
   credit?: number;
+  /** Ordered during the day for tomorrow morning: on the dock at opening. */
+  tomorrow?: { dept: DeptId; qty: number; unitCost: number; life?: ChilledLife }[];
   /** Life on the shop floor: bursts, small jobs and questions (live play). */
   floor?: Floor;
 }
