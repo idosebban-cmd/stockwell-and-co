@@ -10,6 +10,7 @@ import { CONFIG, DEPTS, deptName, hourLabel, type ChilledLife, type DeptId, type
 import { makeScenario } from './scenario';
 import { burstArrivals, floorMood, makeFloor, spawnAndExpire } from './floor';
 import { makeStaff, ROSTER, TEMP_ENTRY } from './roster';
+import { staffFromPerson } from './people';
 import * as S from './stock';
 import type {
   ActionRequest,
@@ -389,7 +390,8 @@ function addExtra(state: SimState, line: string, amount: number): void {
 // ---------------------------------------------------------------------------
 
 export function onShift(state: SimState, hour = state.hour): StaffMember[] {
-  return state.staff.filter((s) => s.availableFrom <= hour);
+  const step = hour === state.hour ? hour * STEPS + (state.step ?? 0) : hour * STEPS;
+  return state.staff.filter((s) => (s.availableFromStep !== undefined ? s.availableFromStep <= step : s.availableFrom <= hour));
 }
 
 export function productivity(energy: number): number {
@@ -548,7 +550,10 @@ export function actionCost(a: ActionRequest): number {
     case 'cashAndCarry':
       return orderQty(a) * C.departments[a.dept].unitCost * C.actions.cashAndCarry.costMult;
     case 'letRunOut':
+    case 'letGo':
       return 0;
+    case 'hire':
+      return C.hiring.hireCost;
   }
 }
 
@@ -649,6 +654,30 @@ export function describeAction(state: SimState, a: ActionRequest, alreadyPlanned
       else if (at === null) reason = 'There are no more deliveries today.';
       break;
     }
+    case 'hire': {
+      const p = a.person;
+      const t = h * STEPS + (state.step ?? 0);
+      const today = h < C.hiring.sameDayBefore && t + C.hiring.startDelayMinutes < state.ctx.hours * STEPS - 60;
+      const at = t + C.hiring.startDelayMinutes;
+      title = `Hire ${p.name}`;
+      timing = today ? `Walks in at about ${clockLabel(Math.floor(at / STEPS), at % STEPS)} and starts straight away.` : 'Starts tomorrow morning.';
+      effect = `${money(C.hiring.hireCost)} to hire now, then ${money(p.wage)} an hour on shift, paid at closing.`;
+      const team = teamSize(state);
+      if (state.ctx.mode !== 'campaign') reason = 'Hiring is part of running your own shop.';
+      else if (state.staff.some((s) => s.id === p.id) || state.hires?.some((x) => x.person.id === p.id)) reason = `${p.name} is already on the team.`;
+      else if (team >= (state.ctx.teamLimit ?? 99)) reason = `The break room only takes a team of ${state.ctx.teamLimit}. A bigger break room makes space.`;
+      break;
+    }
+    case 'letGo': {
+      const s = state.staff.find((x) => x.id === a.staffId);
+      title = `Let ${s?.name ?? 'them'} go`;
+      timing = 'They leave now; today’s wages so far are still paid.';
+      effect = `The team is unsettled (a little strain for everyone) and word gets round (reputation −${Math.abs(C.hiring.letGo.reputation)}).`;
+      if (!s || s.isTemp || state.leavers?.includes(s.id)) reason = 'Not on the team.';
+      else if (state.ctx.mode !== 'campaign') reason = 'Only in your own shop.';
+      else if (teamSize(state) <= 1) reason = 'The shop needs at least one person.';
+      break;
+    }
     case 'letRunOut': {
       title = `Let ${deptName(a.dept).toLowerCase()} run out`;
       timing = 'For the rest of today.';
@@ -693,7 +722,7 @@ export function assignmentLimit(a: AssignmentId, state?: SimState): number {
   if (a === 'tills') return state ? state.ctx.tills : C.staff.limits.tills;
   if (state && a.startsWith('replenish:') && !hasDept(state, a.split(':')[1] as DeptId)) return 0;
   if (a === 'receive') return C.staff.limits.receive;
-  if (a === 'break') return C.staff.limits.break;
+  if (a === 'break') return state?.ctx.breakCap ?? C.staff.limits.break;
   return C.staff.limits.replenish;
 }
 
@@ -805,6 +834,31 @@ function applyActions(state: SimState, actions: ActionRequest[]): void {
       case 'letRunOut':
         if (state.floor) state.floor.letRunOut = [...(state.floor.letRunOut ?? []), a.dept];
         break;
+      case 'hire': {
+        addExtra(state, 'Hiring', C.hiring.hireCost);
+        const t = h * STEPS + (state.step ?? 0);
+        const today = h < C.hiring.sameDayBefore && t + C.hiring.startDelayMinutes < state.ctx.hours * STEPS - 60;
+        state.hires = [...(state.hires ?? []), { person: a.person, today }];
+        if (today) {
+          const at = t + C.hiring.startDelayMinutes;
+          const s = staffFromPerson(a.person, { availableFrom: Math.floor(at / STEPS), newcomer: true });
+          s.availableFromStep = at;
+          state.staff.push(s);
+          state.announcements = [...state.announcements, `${a.person.name} is on the way in.`];
+        }
+        break;
+      }
+      case 'letGo': {
+        const s = state.staff.find((x) => x.id === a.staffId)!;
+        // Off shift from now (kept in the list for today's accounts).
+        s.availableFromStep = 1e9;
+        s.availableFrom = 1e9;
+        state.leavers = [...(state.leavers ?? []), s.id];
+        for (const o of state.staff) if (o !== s && !o.isTemp) o.strain += C.hiring.letGo.teamStrain;
+        state.floor?.mood.push({ delta: C.hiring.letGo.mood, until: t0(state) + C.hiring.letGo.moodMinutes, label: `${s.name} was let go` });
+        for (const task of state.floor?.tasks ?? []) if (task.assigned === s.id) task.assigned = null;
+        break;
+      }
       case 'temp': {
         addExtra(state, 'Agency temp', A.temp.bookingFee);
         state.used.temp = true;
@@ -822,6 +876,16 @@ function applyActions(state: SimState, actions: ActionRequest[]): void {
   }
 }
 
+/** People on the team today (not temps, not let go), including anyone hired today. */
+export function teamSize(state: SimState): number {
+  const staff = state.staff.filter((s) => !s.isTemp && !state.leavers?.includes(s.id)).length;
+  return staff + (state.hires ?? []).filter((x) => !x.today).length;
+}
+
+function t0(state: SimState): number {
+  return state.hour * STEPS + (state.step ?? 0);
+}
+
 /** Takes an action now, between minutes (live play): the same effect as the start of an interval. */
 export function takeAction(input: SimState, a: ActionRequest): SimState {
   const info = describeAction(input, a);
@@ -834,8 +898,8 @@ export function takeAction(input: SimState, a: ActionRequest): SimState {
 }
 
 /** Output multiplier for a person in a job: speciality, temp, and tiredness. */
-export function jobRate(s: StaffMember, a: AssignmentId): number {
-  return skill(s, a);
+export function jobRate(s: StaffMember, a: AssignmentId, hour = 0): number {
+  return skill(s, a, hour);
 }
 
 /** Work per hour at full speed for a job, in its own unit (customers or items). */
@@ -846,14 +910,29 @@ export function baseJobRate(a: AssignmentId): number {
   return 0;
 }
 
-function skill(s: StaffMember, a: AssignmentId): number {
+function skill(s: StaffMember, a: AssignmentId, hour = 0): number {
   const b = 1 + C.staff.specialityBonus;
   let m = s.isTemp ? C.actions.temp.productivity : 1;
   if (a === 'tills' && s.speciality === 'checkout') m *= b;
   if (a === 'replenish:produce' && s.speciality === 'produce') m *= b;
   if (a === 'replenish:chilled' && s.speciality === 'chilled') m *= b;
   if (a === 'receive' && s.speciality === 'receiving') m *= b;
-  return m * productivity(s.energy);
+  return m * traitSpeed(s, a, hour) * (s.newcomer ? C.hiring.newcomer.productivity : 1) * productivity(s.energy);
+}
+
+/** Speed from character traits for a job at an hour (1 = no effect). */
+export function traitSpeed(s: StaffMember, a: AssignmentId, hour: number): number {
+  const T = C.traits;
+  let m = 1;
+  const morning = hour < C.hiring.sameDayBefore;
+  for (const t of s.traits ?? []) {
+    if (t === 'morningPerson') m *= morning ? T.morningPerson.before : T.morningPerson.after;
+    if (t === 'nightOwl') m *= morning ? T.nightOwl.before : T.nightOwl.after;
+    if (t === 'chatty' && a === 'tills') m *= T.chatty.tillSpeed;
+    if (t === 'dislikesStockroom' && a === 'receive') m *= T.dislikesStockroom.receiveSpeed;
+    if (t === 'tidy' && a === 'task') m *= T.tidy.floorSpeed;
+  }
+  return m;
 }
 
 function emptyDeptReport(): DeptHourReport {
@@ -911,7 +990,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
   applyActions(state, plan.actions);
 
   const working = onShift(state, h);
-  const assigned = working.map((s) => ({ s, a: plan.assignments[s.id] as AssignmentId, energyBefore: s.energy, prod: skill(s, plan.assignments[s.id] as AssignmentId) }));
+  const assigned = working.map((s) => ({ s, a: plan.assignments[s.id] as AssignmentId, energyBefore: s.energy, prod: skill(s, plan.assignments[s.id] as AssignmentId, h) }));
   const calm = assigned.some(({ s, a }) => a === 'tills' && s.speciality === 'calm');
   const patience = C.checkout.patienceMinutes + (calm ? C.staff.calmPatienceMinutes : 0) + (state.ctx.patienceBonus ?? 0);
 
@@ -978,7 +1057,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
     let receiveCap = 0;
     const replCap: Record<DeptId, number> = { produce: 0, chilled: 0, ambient: 0 };
     for (const { s, a } of assigned) {
-      const r = skill(s, a);
+      const r = skill(s, a, h);
       if (a === 'tills') tillCap += C.checkout.customersPerHour * r;
       else if (a === 'receive') receiveCap += C.staff.receiveRate * r;
       else if (a.startsWith('replenish:')) {
@@ -1154,7 +1233,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       } else {
         m.restRun = 0;
         const key = a === 'tills' ? 'tills' : a === 'receive' ? 'receive' : 'replenish';
-        const drain = C.staff.energy[key] * (m.speciality === 'stamina' ? C.staff.staminaDrain : 1);
+        const drain = C.staff.energy[key] * (m.speciality === 'stamina' ? C.staff.staminaDrain : 1) * (m.traits?.includes('steady') ? C.traits.steady.energyDrain : 1);
         m.energy = Math.max(0, m.energy + drain * stepShare);
         m.stepsWorked = (m.stepsWorked ?? 0) + 1;
         // A floor job gets a minute of work.
@@ -1162,7 +1241,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
           const t = state.floor.tasks.find((x) => x.assigned === m.id);
           if (t) {
             // A cash-and-carry run takes its minutes whoever goes; floor jobs go at the person's pace.
-            t.progress += t.kind === 'errand' ? 1 : productivity(m.energy) * (m.isTemp ? C.actions.temp.productivity : 1);
+            t.progress += t.kind === 'errand' ? 1 : skill(m, 'task', h);
             if (t.progress >= t.work - 1e-9) {
               state.floor.tasks = state.floor.tasks.filter((x) => x !== t);
               if (t.brings) {
@@ -1180,8 +1259,11 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       }
       if (m.isTemp) addExtra(state, 'Agency temp', C.actions.temp.hourlyFee * stepShare);
       else {
-        state.ledger.wages += C.wagePerHour * stepShare;
-        state.cash -= C.wagePerHour * stepShare;
+        const pay = (m.wage ?? C.wagePerHour) * stepShare;
+        state.ledger.wages += pay;
+        // In your shop wages are paid at closing; Quick play pays as it goes.
+        if (state.ctx.mode === 'campaign') state.wagesDue = (state.wagesDue ?? 0) + pay;
+        else state.cash -= pay;
       }
     }
     for (const [line, perDay] of Object.entries(state.ctx.overheads)) addExtra(state, line, (perDay / state.ctx.hours) * stepShare);
@@ -1192,6 +1274,9 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       const sat = satisfactionScore(state, h, stepDept, stepMults, stepWait, left, arrivals);
       // Floor jobs and answers can't be foreseen, so previews leave them out.
       if (!opts.forecastOnly) sat.score = clamp(sat.score + floorMood(state.floor, abs, state.ctx.penaltyScale ?? 1), 0, 100);
+      // Regulars enjoy a chat at the till.
+      const chatty = assigned.filter(({ s: m, a }) => a === 'tills' && m.traits?.includes('chatty')).length;
+      if (chatty) sat.score = clamp(sat.score + chatty * C.traits.chatty.satisfaction, 0, 100);
       state.satisfaction.weightedSum += sat.score * arrivals;
       state.satisfaction.customers += arrivals;
       satWeighted += sat.score * arrivals;
@@ -1407,6 +1492,11 @@ function closeDay(state: SimState, report: HourReport, waste: WasteLine[]): void
   }
   for (const d of DEPTS) expire(state, d, close, waste, notes);
   if (state.ctx.mode === 'campaign') closeForTheNight(state, waste, notes);
+  if (state.wagesDue) {
+    state.cash -= state.wagesDue;
+    notes.push(`Wages paid: ${money(state.wagesDue)}.`);
+    state.wagesDue = 0;
+  }
   for (const s of state.staff) {
     if (!s.isTemp && s.breaks === 0 && s.hoursWorked >= C.wellbeing.hoursBeforeBreakNeeded) s.strain += C.wellbeing.noBreakAllDayStrain;
   }

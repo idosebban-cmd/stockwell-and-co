@@ -3974,3 +3974,145 @@ ul.tannoy {
 .sr-confirm {
   padding: 6px 14px;
 }
+
+/* Hiring */
+.hiring-team {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+.candidates {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.candidate {
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--paper);
+}
+.candidate.open {
+  border-color: var(--burgundy);
+}
+.cand-top {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.cand-name {
+  display: block;
+  font-size: 1.05rem;
+  color: var(--burgundy-dark);
+}
+.cand-strength {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.cand-bio,
+.cand-pay {
+  margin: 4px 0;
+}
+.cand-pay {
+  font-size: 0.85rem;
+}
+.cand-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+.cand-confirm p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.trait-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.trait-chips li {
+  background: var(--mustard-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: help;
+}
+.new-badge {
+  margin-left: 6px;
+  background: var(--good);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.skill-pips {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0;
+  font-size: 0.8rem;
+}
+.skill-pips dt {
+  color: var(--muted);
+}
+.skill-pips dd {
+  margin: 0;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+}
+.pip.on {
+  background: var(--mustard);
+  border-color: #9a6f12;
+}
+.row-extra {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.btn-danger {
+  background: var(--bad);
+  color: #fff;
+  border: 2px solid #7a1f1a;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.let-go {
+  font-size: 0.8rem;
+}
+.staff-arrive {
+  animation: staff-walk-in 1.6s ease-out both;
+}
+@keyframes staff-walk-in {
+  from {
+    transform: translate(var(--sx), var(--sy));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+.reduced-motion .staff-arrive {
+  animation: none !important;
+}

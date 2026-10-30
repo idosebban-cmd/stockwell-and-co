@@ -28,11 +28,12 @@ import {
   weekdayName,
   wellbeing,
 } from './engine';
-import { makeStaff, ROSTER, SPECIALITY_TEXT } from './roster';
+import { DEFAULT_ASSIGNMENTS, ROSTER, SPECIALITY_TEXT } from './roster';
+import { candidatePool, personFromRoster, staffFromPerson } from './people';
 import { mulberry32, signed } from './rng';
 import * as S from './stock';
 import { choicesFromHourlyPlans, isClosed, replayLive, type Choice, type Live } from './live';
-import type { ActionRequest, Batch, DayContext, HourPlan, HourReport, Scenario, SetupPlan, SimState } from './types';
+import type { ActionRequest, Batch, DayContext, HourPlan, HourReport, Person, Scenario, SetupPlan, SimState } from './types';
 
 const C = CONFIG;
 const K = C.campaign;
@@ -46,6 +47,25 @@ export interface CampaignStaff {
   id: string;
   /** Strain carried from earlier days (drives the week's wellbeing and lowers morning energy). */
   fatigue: number;
+  /** Who they are (missing for saves from before hiring: the original six, looked up by id). */
+  person?: Person;
+  /** First day on the team (they are new for `hiring.newcomer.days`). */
+  joinedDay?: number;
+}
+
+/** A team member's details. */
+export function personOf(cs: CampaignStaff): Person {
+  return cs.person ?? personFromRoster(ROSTER.find((r) => r.id === cs.id)!);
+}
+
+/** How big the team can be: the break room's size. */
+export function teamLimit(camp: CampaignState): number {
+  return C.hiring.teamLimit + (owns(camp, 'breakRoom') ? K.upgrades.breakRoom.extraTeam : 0);
+}
+
+/** The morning's candidates (anyone already on the team is left out). */
+export function campaignPool(camp: CampaignState): Person[] {
+  return candidatePool(camp.seed, camp.day, camp.reputation, camp.staff.map((s) => s.id));
 }
 
 export interface DayResult {
@@ -190,6 +210,8 @@ export function dayContext(camp: CampaignState): DayContext {
     actions: dayActions(camp.day).filter((a) => (a === 'repair' ? depts.includes('chilled') : true)),
     pricing: camp.day >= K.unlocks.pricing,
     patienceBonus: isGenerous(camp.day) ? K.generous.patienceBonusMinutes : 0,
+    teamLimit: teamLimit(camp),
+    breakCap: C.staff.limits.break + (owns(camp, 'breakRoom') ? K.upgrades.breakRoom.extraBreak : 0),
     penaltyScale: isGenerous(camp.day) ? K.generous.penaltyScale : 1,
   };
 }
@@ -233,9 +255,8 @@ export function morningEnergy(fatigue: number): number {
 
 export function campaignStaff(camp: CampaignState) {
   return camp.staff.map((cs) => {
-    const entry = ROSTER.find((r) => r.id === cs.id)!;
-    const s = makeStaff(entry);
-    s.energy = morningEnergy(cs.fatigue);
+    const s = staffFromPerson(personOf(cs), { energy: morningEnergy(cs.fatigue), newcomer: cs.joinedDay !== undefined && camp.day - cs.joinedDay < C.hiring.newcomer.days });
+    s.lastAssignment = DEFAULT_ASSIGNMENTS[cs.id] ?? 'tills';
     return s;
   });
 }
@@ -364,14 +385,23 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
   const stock = perDept((d) => ({ shelf: shift(state.stock[d].shelf), backroom: shift(state.stock[d].backroom), dock: shift(state.stock[d].dock) }));
   // Ordered during the day for tomorrow: on the dock at opening, dated from tomorrow.
   for (const o of state.tomorrow ?? []) S.add(stock[o.dept].dock, datedBatches(o.dept, o.qty, o.unitCost, o.life, camp.day + 1));
-  const staff = camp.staff.map((cs) => {
-    const s = state.staff.find((x) => x.id === cs.id);
-    return { id: cs.id, fatigue: cs.fatigue * K.fatigue.carry + (s?.strain ?? 0) };
-  });
+  const leavers = state.leavers ?? [];
+  const staff: CampaignStaff[] = camp.staff
+    .filter((cs) => !leavers.includes(cs.id))
+    .map((cs) => {
+      const s = state.staff.find((x) => x.id === cs.id);
+      return { ...cs, fatigue: cs.fatigue * K.fatigue.carry + (s?.strain ?? 0) };
+    });
+  // Hired today: those who started today carry today's strain; the rest start tomorrow.
+  for (const h of state.hires ?? []) {
+    const s = state.staff.find((x) => x.id === h.person.id);
+    staff.push({ id: h.person.id, fatigue: s?.strain ?? 0, person: h.person, joinedDay: h.today ? camp.day : camp.day + 1 });
+  }
   const sat = satisfactionSoFar(state);
   // In the first days a poor day costs less reputation.
   const pull = K.reputation.pull * (sat < camp.reputation && isGenerous(camp.day) ? K.generous.reputationDropScale : 1);
-  const reputation = camp.reputation + (sat - camp.reputation) * pull;
+  // Letting people go gets talked about.
+  const reputation = camp.reputation + (sat - camp.reputation) * pull + leavers.length * C.hiring.letGo.reputation;
   const reports = state.history;
   const profit = operatingProfit(state);
   const next: CampaignState = {
@@ -468,24 +498,37 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
   const tooEarly = (from: number) => (camp.day < from + 1 ? `Available from ${weekdayName(from + 1)}.` : null);
   const ended: string | null = null;
 
-  for (const id of K.hireable) {
-    const r = ROSTER.find((x) => x.id === id)!;
-    const hired = camp.staff.some((s) => s.id === id);
-    if (hired) continue;
+  // Hires: the old regulars and today's other candidates (hiring is done from the office; these are its shortcut and the scripted players' list).
+  const full = camp.staff.length >= teamLimit(camp);
+  for (const p of hireCandidates(camp)) {
+    const cost = C.hiring.hireCost;
     out.push({
-      id: `hire:${id}`,
-      name: `Hire ${r.name}`,
-      cost: U.hire.cost,
-      recurring: `${money(C.wagePerHour)} an hour on shift`,
-      effect: `One more pair of hands every day. ${SPECIALITY_TEXT[r.speciality]}.`,
-      brief: `Another pair of hands. ${SPECIALITY_TEXT[r.speciality].split(' (')[0]}.`,
-      available: !ended && camp.cash >= U.hire.cost,
-      reason: ended ?? (camp.cash < U.hire.cost ? `Needs ${money(U.hire.cost)}.` : null),
-      cashAfter: camp.cash - U.hire.cost,
+      id: `hire:${p.id}`,
+      name: `Hire ${p.name}`,
+      cost,
+      recurring: `${money(p.wage)} an hour on shift`,
+      effect: `One more pair of hands every day. ${SPECIALITY_TEXT[p.speciality]}.`,
+      brief: `Another pair of hands. ${SPECIALITY_TEXT[p.speciality].split(' (')[0]}.`,
+      available: !ended && !full && camp.cash >= cost,
+      reason: ended ?? (full ? `The break room takes a team of ${teamLimit(camp)}.` : camp.cash < cost ? `Needs ${money(cost)}.` : null),
+      cashAfter: camp.cash - cost,
       why: signals.stretched ? signals.stretched : '',
       score: (signals.stretchedScore ?? 0) + 1,
     });
   }
+  add(
+    'breakRoom',
+    {
+      name: U.breakRoom.name,
+      cost: U.breakRoom.cost,
+      recurring: null,
+      effect: `Room for a team of ${C.hiring.teamLimit + U.breakRoom.extraTeam} (now ${C.hiring.teamLimit}), and ${C.staff.limits.break + U.breakRoom.extraBreak} on a break at once.`,
+      brief: `Team of ${C.hiring.teamLimit + U.breakRoom.extraTeam}; ${C.staff.limits.break + U.breakRoom.extraBreak} on a break at once.`,
+      why: full ? `The team is as big as the break room allows (${camp.staff.length}).` : '',
+      score: full ? 2 : 0.2,
+    },
+    ended ?? tooEarly(U.breakRoom.from),
+  );
   add(
     'till3',
     {
@@ -543,6 +586,13 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
   return out;
 }
 
+/** Everyone who could be hired now: the old regulars not on the team, then the morning's new candidates. */
+export function hireCandidates(camp: CampaignState): Person[] {
+  const taken = camp.staff.map((s) => s.id);
+  const regulars = K.hireable.filter((id) => !taken.includes(id)).map((id) => personFromRoster(ROSTER.find((r) => r.id === id)!));
+  return [...regulars, ...campaignPool(camp).filter((p) => !regulars.some((r) => r.id === p.id))];
+}
+
 /** Up to three offers worth a look today: affordable, available and relevant to what happened. */
 export function topOffers(camp: CampaignState, lastDay: SimState | null): Offer[] {
   return allOffers(camp, lastDay)
@@ -595,7 +645,8 @@ export function buy(camp: CampaignState, id: UpgradeId): CampaignState {
   if (!offer.available) throw new Error(`${offer.name}: ${offer.reason}`);
   const next: CampaignState = { ...camp, cash: camp.cash - offer.cost, owned: [...camp.owned, id] };
   if (id.startsWith('hire:')) {
-    next.staff = [...camp.staff, { id: id.slice(5), fatigue: 0 }];
+    const person = hireCandidates(camp).find((p) => p.id === id.slice(5))!;
+    next.staff = [...camp.staff, { id: person.id, fatigue: 0, person, joinedDay: camp.day }];
     next.betweenDayCosts = camp.betweenDayCosts + offer.cost;
   } else next.equipment = camp.equipment + offer.cost;
   next.startValue = camp.startValue;

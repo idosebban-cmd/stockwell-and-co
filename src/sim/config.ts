@@ -102,6 +102,44 @@ export const CONFIG = {
     },
   },
 
+  /**
+   * Hiring from the office, at any time (your shop). A pool of candidates each
+   * morning; more as reputation rises. Hired before `sameDayBefore` they walk in
+   * `startDelayMinutes` later; after it, they start the next morning. New people
+   * work a little slower for their first days. The team can't outgrow the break
+   * room (`teamLimit`), which the "Bigger break room" upgrade raises.
+   */
+  hiring: {
+    poolSize: 3,
+    poolMax: 5,
+    /** One more candidate for every this many reputation points above `poolFrom`. */
+    poolFrom: 70,
+    poolPerReputation: 6,
+    /** Chance each of the old regulars (Bev, Tomasz, Dougie) is in a morning's pool, if not on the team. */
+    regularChance: 0.6,
+    hireCost: 60,
+    /** Hourly wage range (specialists ask a little more). Wages are paid at closing. */
+    wage: { min: 11.6, max: 13.4, specialistPremium: 0.6 },
+    /** Hours from opening: 3 = 12:00. */
+    sameDayBefore: 3,
+    startDelayMinutes: 30,
+    newcomer: { days: 2, productivity: 0.85 },
+    teamLimit: 5,
+    /** Letting someone go: reputation, strain for the rest of the team, and the mood in the shop for a while. */
+    letGo: { reputation: -1, teamStrain: 2, mood: -2, moodMinutes: 60 },
+    names: ['Aisha', 'Callum', 'Ffion', 'Gareth', 'Hana', 'Imran', 'Jade', 'Kofi', 'Lydia', 'Marek', 'Niamh', 'Olu', 'Pat', 'Rosie', 'Sanjay', 'Tess', 'Wes', 'Yusuf', 'Zainab', 'Dot'],
+  },
+
+  /** Character traits: small, readable effects on top of a person's strength. */
+  traits: {
+    morningPerson: { label: 'Morning person', text: 'Quicker before 12:00, slower after', before: 1.1, after: 0.95 },
+    nightOwl: { label: 'Night owl', text: 'Slow to get going; quicker after 12:00', before: 0.95, after: 1.1 },
+    chatty: { label: 'Chatty with regulars', text: 'Shoppers enjoy the chat at the till (+1 satisfaction), but it’s a little slower', tillSpeed: 0.95, satisfaction: 1 },
+    dislikesStockroom: { label: 'Dislikes the stockroom', text: 'Slower unloading deliveries', receiveSpeed: 0.85 },
+    steady: { label: 'Steady', text: 'Tires more slowly', energyDrain: 0.85 },
+    tidy: { label: 'Tidy', text: 'Sorts out floor jobs quicker', floorSpeed: 1.3 },
+  },
+
   /** Sound and the little coin pops when a till takes money. */
   juice: {
     /** Volume of the till ding, 0–1 (gentle). */
@@ -407,7 +445,7 @@ export const CONFIG = {
     /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */
     unlocks: {
       pricing: 2,
-      actions: { emergency: 0, cashAndCarry: 0, nextDelivery: 0, letRunOut: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
+      actions: { emergency: 0, cashAndCarry: 0, nextDelivery: 0, letRunOut: 0, hire: 0, letGo: 0, markdown: 2, promotion: 2, temp: 3, repair: 3 },
     },
     /**
      * The first days forgive mistakes rather than lowering the activity: shoppers wait longer before giving up,
@@ -539,6 +577,7 @@ export const CONFIG = {
       shelfChilled: { name: 'Two more chilled cabinets', cost: 350, perDay: 6, from: 2, equipment: true, extra: 130 },
       fridge: { name: 'Better refrigeration', cost: 300, perDay: 0, from: 2, equipment: true },
       hire: { name: 'Hire', cost: 60, perDay: 0, from: 0, equipment: false },
+      breakRoom: { name: 'Bigger break room', cost: 400, perDay: 0, from: 1, equipment: true, extraTeam: 2, extraBreak: 1 },
     },
     /** Share of the chilled range two cabinets carry (four carry it all). */
     smallChilledRange: 0.5,

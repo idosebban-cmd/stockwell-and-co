@@ -19,6 +19,7 @@ export type Selection =
   | { kind: 'forecast' }
   | { kind: 'outlook' }
   | { kind: 'stockroom' }
+  | { kind: 'office' }
   | null;
 
 export interface PanelContext {
@@ -81,11 +82,13 @@ interface Props {
   onAssignTask?: (taskId: string, staffId: string) => void;
   /** Live play: a line to show briefly (e.g. what an answer did). */
   notice?: { id: number; text: string } | null;
+  /** Your shop: the office opens hiring. */
+  office?: boolean;
 }
 
 const STEP_MS = { normal: 800, fast: 380 };
 
-export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices, onMove, clock, pops, paused, floor, onAssignTask, notice }: Props) {
+export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices, onMove, clock, pops, paused, floor, onAssignTask, notice, office }: Props) {
   const live = phase === 'live';
   /** Planning or playing live: the shop can be changed. */
   const planning = phase === 'plan' || live;
@@ -319,6 +322,7 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             floor={floor}
             onTask={onAssignTask && interactive ? onTask : undefined}
             stockroom={stockroom}
+            office={office && live ? { onOpen: () => setSel(sel?.kind === 'office' ? null : { kind: 'office' }), open: sel?.kind === 'office' } : undefined}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}
             highlightStaff={lessonTarget.staff}

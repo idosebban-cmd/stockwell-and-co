@@ -34,6 +34,7 @@ import { total } from '../sim/stock';
 import { ASSIGNMENTS, type ActionRequest, type AssignmentId, type HourPlan, type SimState } from '../sim/types';
 import { ZONE_NAME, type ZoneId } from './Store';
 import { StockroomCard } from './StockroomCard';
+import { HiringPanel, LetGo, PersonFacts, TraitChips, type HiringProps } from './Hiring';
 import { Forecast } from './Forecast';
 import type { Selection } from './ShopScreen';
 
@@ -82,10 +83,12 @@ interface GameProps {
   sel: Selection;
   setSel: (s: Selection) => void;
   opts?: PanelOptions;
+  /** Your shop: the office's hiring panel. */
+  hiring?: HiringProps;
 }
 
 /** The one contextual panel for the full game while planning. */
-export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME }: GameProps) {
+export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME, hiring }: GameProps) {
   const close = () => setSel(null);
   const open = (z: ZoneId) => setSel({ kind: 'zone', zone: z });
   if (!sel) return <IdlePanel state={state} />;
@@ -94,6 +97,13 @@ export function GamePanel({ state, plan, onChange, sel, setSel, opts = FULL_GAME
       return <StaffCard state={state} plan={plan} onChange={onChange} id={sel.id} onClose={close} />;
     case 'zone':
       return <ContextCard state={state} plan={plan} onChange={onChange} zone={sel.zone} onClose={close} opts={opts} onOpen={open} onStockroom={() => setSel({ kind: 'stockroom' })} />;
+    case 'office':
+      return (
+        <section className="panel-inner context-card" aria-label="Office: hiring">
+          <PanelHead title="Hiring" kicker="The office" onClose={close} />
+          {hiring ? <HiringPanel {...hiring} /> : <p className="idle-hint">Hiring is part of running your own shop.</p>}
+        </section>
+      );
     case 'stockroom':
       return (
         <section className="panel-inner context-card" aria-label="Stockroom">
@@ -257,7 +267,19 @@ export function StaffCard({ state, plan, onChange, id, onClose, jobs }: { state:
           );
         })}
       </ul>
-      <p className="tiny muted">Or click a highlighted place in the shop.</p>
+      <p className="tiny muted">Or drag {s.name} to a place in the shop.</p>
+      <PersonFacts
+        s={s}
+        onLetGo={
+          state.ctx.mode === 'campaign' && !s.isTemp
+            ? () => {
+                onChange({ ...plan, actions: [...plan.actions, { kind: 'letGo', staffId: s.id }] });
+                onClose();
+              }
+            : undefined
+        }
+        letGoReason={describeAction(state, { kind: 'letGo', staffId: s.id }).reason}
+      />
       <details className="more">
         <summary>About {s.name}</summary>
         <p className="tiny">
@@ -863,6 +885,10 @@ function actionShortLabel(a: ActionRequest): string {
       return 'Rush delivery';
     case 'nextDelivery':
       return 'Add to the next delivery';
+    case 'hire':
+      return `Hire ${a.person.name}`;
+    case 'letGo':
+      return 'Let go';
     case 'cashAndCarry':
       return `Cash-and-carry: send ${ROSTER.find((r) => r.id === a.staffId)?.name ?? 'someone'}`;
     case 'letRunOut':
@@ -936,7 +962,7 @@ function ActionList({
 /** Team overview: everyone's job (changeable here too), energy and speed. */
 export function StaffList({ state, plan, onChange, onSelect }: { state: SimState; plan: HourPlan; onChange: (p: HourPlan) => void; onSelect: (id: string) => void }) {
   const staff = onShift(state);
-  const coming = state.staff.filter((s) => s.availableFrom > state.hour && s.availableFrom < 99);
+  const coming = state.staff.filter((s) => !onShift(state).includes(s) && s.availableFrom < 99);
   const counts = new Map<AssignmentId, number>();
   for (const s of staff) {
     const a = plan.assignments[s.id];
@@ -979,13 +1005,24 @@ export function StaffList({ state, plan, onChange, onSelect }: { state: SimState
                 {prod < 1 ? ` · ${Math.round(prod * 100)}%` : ''}
               </span>
               {blocked && <p className="row-warn">✕ {blocked}</p>}
+              <div className="row-extra">
+                {s.traits && <TraitChips traits={s.traits} />}
+                {s.newcomer && <span className="new-badge">New</span>}
+                {state.ctx.mode === 'campaign' && !s.isTemp && (
+                  <LetGo
+                    name={s.name}
+                    reason={describeAction(state, { kind: 'letGo', staffId: s.id }).reason}
+                    onLetGo={() => onChange({ ...plan, actions: [...plan.actions, { kind: 'letGo', staffId: s.id }] })}
+                  />
+                )}
+              </div>
             </li>
           );
         })}
       </ul>
       {coming.map((s) => (
         <p key={s.id} className="tiny note-info">
-          {s.name} arrives at {hourLabel(s.availableFrom)}.
+          {s.name} arrives at {s.availableFromStep !== undefined ? clockLabel(Math.floor(s.availableFromStep / CONFIG.stepsPerHour), s.availableFromStep % CONFIG.stepsPerHour) : hourLabel(s.availableFrom)}.
         </p>
       ))}
     </section>

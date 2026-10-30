@@ -93,6 +93,19 @@ The default allocation shouldn’t solve the day: there should usually be more j
 
 Prompts counted: a burst announced, a floor job appearing, a question, a shelf falling below a quarter with stock out the back, a queue building, a delivery on the dock. A real player who reacts more slowly will see more queue and shelf prompts than the script, so this sits at the busy end of the target on purpose; lower `floor.tasks.perHour` if it feels hectic. In development builds (`npm run dev`) the game logs the same count to the console each real minute of running clock (`[pacing] …`) and shows it in the corner.
 
+## Hiring (start of Phase 3: staff growth)
+
+- **The office** (click it, or Tab to it and press Enter) opens **Hiring**: today’s candidates as cards with a portrait, a strength (“Fast on the till”, “Quick unloader”, “Knows the chillers”…), one or two traits, their hourly wage and roughly a day’s pay, and when they’d start. **Hire …** opens a confirmation with the £60 hiring cost, the wage (paid at closing) and the cash left.
+- **The pool** has 3 candidates each morning, one more for every 6 reputation points above 70 (up to 5). Bev, Tomasz and Dougie can each turn up (60% chance a morning, if not on the team), always alongside at least one new face. New people get a generated look, a strength, 1–2 traits and starting skills.
+- **Starting:** hired before 12:00, they walk in through the front door about 30 minutes later and start straight away; after 12:00 they start the next morning. New people work at 85% for their first 2 days.
+- **Traits:** morning person (quicker before 12:00, slower after), night owl (the reverse), chatty with regulars (+1 satisfaction at the till, a little slower), dislikes the stockroom (slower unloading), steady (tires more slowly), tidy (quicker at floor jobs). The original six have one each. Shown on staff cards, in the Team view and on candidate cards.
+- **Skills (groundwork):** every person stores a level 1–5 for tills, shelves, unloading and floor jobs (their strength’s job at 3), shown as pips on their card. Levelling comes next.
+- **Wages** are paid at closing in your shop, at each person’s own rate, and shown on the closing card (“wages paid £…”). Quick play still pays as it goes.
+- **Team size** is limited by the break room: 5 people; **Bigger break room** (£400, from day 2) makes it 7, with 3 on a break at once.
+- **Letting go:** from the Team view or a person’s card, with a short confirmation. They leave at once; the rest of the team takes a little strain, the shop’s mood dips for an hour, and reputation drops by 1 at closing. The last person can’t be let go.
+- **At closing,** “Hire from the office” in Improve the shop shows the next morning’s candidates; they start tomorrow.
+- Numbers in `hiring` and `traits` in `src/sim/config.ts`; candidates in `src/sim/people.ts`; tests in `src/sim/hiring.test.ts`.
+
 ## Your shop in brief
 
 - **Endless days.** Sunday to Saturday and round again. Days open at 09:00 and run for their real hours: Sunday 4, Monday 5, Tuesday and Wednesday 6, Thursday and Friday 7, Saturday 8. Each completed week brings 5% more shoppers (up to +30%).

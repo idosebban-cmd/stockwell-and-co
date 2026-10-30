@@ -21,6 +21,8 @@ import {
   type CampaignState,
   type Offer,
   type UpgradeId,
+  campaignPool,
+  teamLimit,
   weekOf,
   WEEK_DAYS,
 } from '../sim/campaign';
@@ -29,6 +31,7 @@ import { ShopScreen } from './ShopScreen';
 import { Clock, CueArt, EquipArt, Lorry, Person, Sunrise, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
 import { SPECIALITY_TEXT } from '../sim/roster';
 import type { ShopNotice, ZoneId } from './Store';
+import { HiringPanel } from './Hiring';
 
 const K = CONFIG.campaign;
 
@@ -311,6 +314,8 @@ function equipInfo(id: EquipId): EquipInfo {
       return { benefit: 'Full range · twice the chilled sales', before: `${K.shelf.chilled}`, after: `${K.shelf.chilled + U.shelfChilled.extra}` };
     case 'fridge':
       return { benefit: 'No cabinet faults · half the dock spoilage', before: 'Faults possible', after: 'No faults' };
+    case 'breakRoom':
+      return { benefit: `Team of ${CONFIG.hiring.teamLimit + U.breakRoom.extraTeam} · ${CONFIG.staff.limits.break + U.breakRoom.extraBreak} on a break`, before: `Team of ${CONFIG.hiring.teamLimit}`, after: `Team of ${CONFIG.hiring.teamLimit + U.breakRoom.extraTeam}` };
   }
 }
 
@@ -329,12 +334,15 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
   // "Suggested" only when the day's results give a reason.
   const suggested = new Set(topOffers(camp, closed).filter((o) => o.why).map((o) => o.id));
   const [sel, setSel] = useState<UpgradeId | null>(null);
-  const hires = offers.filter((o) => o.id.startsWith('hire:'));
+  const [hiring, setHiring] = useState(false);
+  // Hiring is done from the office; here it's a shortcut to the same candidates (they start tomorrow).
+  const pool = campaignPool(camp).filter((p) => !bought.includes(`hire:${p.id}`));
+  const hireNames = Object.fromEntries(campaignPool(camp).map((p) => [p.id, p.name]));
   // Chilled extras appear once there is a chilled department to extend.
   const equipment = offers.filter((o) => !o.id.startsWith('hire:') && !(o.reason ?? '').startsWith('Already') && !(o.reason ?? '').startsWith('Needs the chilled'));
   const chosen = offers.find((o) => o.id === sel) ?? null;
   const nextHours = dayConfig(camp.day).hours;
-  const name = (id: UpgradeId) => (id.startsWith('hire:') ? ROSTER.find((r) => r.id === id.slice(5))?.name ?? id : (K.upgrades[id as EquipId]?.name ?? id));
+  const name = (id: UpgradeId) => (id.startsWith('hire:') ? (hireNames[id.slice(5)] ?? ROSTER.find((r) => r.id === id.slice(5))?.name ?? id) : (K.upgrades[id as EquipId]?.name ?? id));
   return (
     <section className="invest" aria-labelledby="invest-h">
       <div className="invest-head">
@@ -354,29 +362,11 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
       </div>
       <div className="invest-body">
         <div className="invest-choices">
-          {hires.length > 0 && (
-            <ul className="choice-row" aria-label="People you could hire">
-              {hires.map((o) => {
-                const r = ROSTER.find((x) => x.id === o.id.slice(5))!;
-                return (
-                  <li key={o.id}>
-                    <button type="button" className={`choice ${sel === o.id ? 'on' : ''} ${o.available ? '' : 'off'}`} aria-pressed={sel === o.id} onClick={() => setSel(sel === o.id ? null : o.id)}>
-                      <Person id={r.id} />
-                      <strong>{r.name}</strong>
-                      <span className="spec">
-                        <SpecialitySymbol s={r.speciality} /> {SPECIALITY_LABEL[r.speciality]}
-                      </span>
-                      <span className="choice-cost">
-                        {pounds(o.cost)} hire · {money(CONFIG.wagePerHour)}/hour
-                      </span>
-                      {!o.available && <span className="choice-off">{shortReason(o)}</span>}
-                      {o.available && suggested.has(o.id) && <span className="choice-tag">Suggested</span>}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <button type="button" className={`choice hire-shortcut ${hiring ? 'on' : ''}`} aria-expanded={hiring} onClick={() => { setHiring((h) => !h); setSel(null); }}>
+            <Person id="office" look={pool[0]?.look} />
+            <strong>Hire from the office</strong>
+            <span className="choice-benefit">{pool.length} looking for work · start tomorrow</span>
+          </button>
           <ul className="choice-row" aria-label="Equipment">
             {equipment.map((o) => {
               const id = o.id as EquipId;
@@ -396,7 +386,18 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
           </ul>
         </div>
         <div className="invest-detail" aria-live="polite">
-          {!chosen ? (
+          {hiring ? (
+            <HiringPanel
+              candidates={pool}
+              teamSize={camp.staff.length}
+              teamLimit={teamLimit(camp)}
+              cash={camp.cash}
+              step={null}
+              hours={nextHours}
+              onHire={(p) => onBuy(`hire:${p.id}`)}
+              reasonFor={(p) => allOffers(camp, closed).find((o) => o.id === `hire:${p.id}`)?.reason ?? null}
+            />
+          ) : !chosen ? (
             <p className="muted">Select a person or a piece of equipment to see what it would do. Saving the money is fine too.</p>
           ) : chosen.id.startsWith('hire:') ? (
             <HireDetail o={chosen} hours={nextHours} nextDay={weekdayName(camp.day)} onBuy={() => { onBuy(chosen.id); setSel(null); }} />

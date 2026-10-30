@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CONFIG } from './sim/config';
-import { recommendedSetup, weekdayName } from './sim/engine';
-import { liveValue, teamWellbeing, type UpgradeId } from './sim/campaign';
+import { describeAction, recommendedSetup, teamSize, weekdayName } from './sim/engine';
+import { campaignPool, liveValue, teamWellbeing, type CampaignState, type UpgradeId } from './sim/campaign';
 import { getStorage, loadMode, saveMode, type Mode } from './sim/save';
 import { CORE_LESSONS, LESSONS } from './sim/tutorial';
 import { QUICK_TARGETS } from './sim/summary';
@@ -21,6 +21,7 @@ import { ShopScreen } from './ui/ShopScreen';
 import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
 import { unlockAudio } from './ui/sound';
 import { EventDialog } from './ui/EventDialog';
+import type { HiringProps } from './ui/Hiring';
 import type { StoreFloor } from './ui/Store';
 import { BURST_TEXT, burstAtDoor, taskText } from './sim/floor';
 import { stepOf } from './sim/live';
@@ -203,6 +204,7 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
           title={`${weekdayName(camp.day)}: closed for the day`}
           kicker={dayKicker(camp.day)}
           cash={after.cash}
+          wages={state.ledger.wages}
           plain
           targets={{ profit: 0, satisfaction: CONFIG.targets.satisfaction, wellbeing: CONFIG.targets.wellbeing }}
           primary={{ label: `Open tomorrow: ${weekdayName(camp.day + 1)} ▶`, onClick: week.continueDay }}
@@ -221,14 +223,27 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
   return (
     <>
       {bar(state, status)}
-      <LiveScreen day={week.day} state={state} reduced={reduced} />
+      <LiveScreen day={week.day} state={state} reduced={reduced} camp={camp} />
     </>
   );
 }
 
 /** A trading day (your shop or Quick play), live: the shop, the clock and the one panel. */
-function LiveScreen({ day, state, reduced }: { day: LiveDay; state: SimState; reduced: boolean }) {
+function LiveScreen({ day, state, reduced, camp }: { day: LiveDay; state: SimState; reduced: boolean; camp?: CampaignState }) {
   const plan = day.live!.plan;
+  // Your shop: the office's candidates (anyone hired today is off the list).
+  const hiring: HiringProps | undefined = camp
+    ? {
+        candidates: campaignPool(camp).filter((p) => !state.hires?.some((h) => h.person.id === p.id) && !state.staff.some((s) => s.id === p.id)),
+        teamSize: teamSize(state),
+        teamLimit: state.ctx.teamLimit ?? CONFIG.hiring.teamLimit,
+        cash: state.cash,
+        step: stepOf(state),
+        hours: state.ctx.hours,
+        onHire: (p) => void day.apply({ ...plan, actions: [{ kind: 'hire', person: p }] }),
+        reasonFor: (p) => describeAction(state, { kind: 'hire', person: p }).reason,
+      }
+    : undefined;
   const pending = state.floor?.pending ?? null;
   return (
     <>
@@ -251,7 +266,8 @@ function LiveScreen({ day, state, reduced }: { day: LiveDay; state: SimState; re
       paused={day.clock.paused}
       clock={<ClockControls clock={day.clock} state={state} />}
       tools={(ctx) => <GameTools state={state} plan={plan} ctx={ctx} current={state.hour} planning />}
-      panel={(ctx) => <GamePanel state={state} plan={plan} onChange={ctx.onPlanChange} sel={ctx.sel} setSel={ctx.setSel} />}
+      panel={(ctx) => <GamePanel state={state} plan={plan} onChange={ctx.onPlanChange} sel={ctx.sel} setSel={ctx.setSel} hiring={hiring} />}
+      office={!!camp}
       floor={storeFloor(state)}
       onAssignTask={day.assignTask}
       notice={day.toast}

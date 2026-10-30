@@ -132,6 +132,8 @@ interface Props {
   onTask?: (taskId: string, staffId: string | null) => void;
   /** Live play: the stockroom opens the ordering panel; it shows orders on their way and a "!" when something will run out. */
   stockroom?: StoreStockroom;
+  /** Your shop: the office opens hiring. */
+  office?: { onOpen: () => void; open: boolean };
 }
 
 export interface StoreStockroom {
@@ -445,6 +447,27 @@ function StoreImpl(props: Props) {
             if (e.key === 'Enter') {
               e.preventDefault();
               props.stockroom!.onOpen();
+            }
+          }}
+        />
+      )}
+      {props.office && interactive && !selected && (
+        <rect
+          className={`zone zone-browse ${props.office.open ? 'zone-context' : ''}`}
+          x="580"
+          y="12"
+          width="120"
+          height="134"
+          rx="10"
+          tabIndex={0}
+          role="button"
+          aria-pressed={props.office.open}
+          aria-label="Office: hire people. Open."
+          onClick={props.office.onOpen}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              props.office!.onOpen();
             }
           }}
         />
@@ -1260,9 +1283,12 @@ function StaffToken({
       <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
       {lesson && !selected && <circle cx="0" cy="-30" r="38" className="lesson-ring" />}
       {selected && <ellipse cx="0" cy="0" rx="22" ry="7" fill="none" stroke="var(--mustard)" strokeWidth="4" />}
-      <g className={act === 'work' ? 'busy' : ''}>
+      <g
+        className={`${act === 'work' ? 'busy' : ''} ${s.availableFromStep !== undefined && s.availableFromStep < 1e9 ? 'staff-arrive' : ''}`}
+        style={s.availableFromStep !== undefined ? { ['--sx' as string]: `${ENTRANCE[0] - x}px`, ['--sy' as string]: `${ENTRANCE[1] - y}px` } : undefined}
+      >
         <g transform={a === 'tills' ? 'scale(1.2)' : 'scale(1.4)'}>
-          <StaffFigure id={s.id} pose={pose} tired={tired} />
+          <StaffFigure id={s.id} look={s.look} pose={pose} tired={tired} />
         </g>
       </g>
       {act === 'idle' && a !== 'break' && <Bubble text="…" />}

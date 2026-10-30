@@ -1,3 +1,4 @@
+import type { PersonLook } from '../sim/types';
 /**
  * Small illustrations for the briefing and the closing screen. Each one is
  * drawn from the same pieces as the shop (staff figures, tills, crates,
@@ -16,11 +17,11 @@ function Svg({ w, h, children, label }: { w: number; h: number; children: ReactN
 }
 
 /** A person from the team, in a pose. */
-export function Person({ id, pose = 'stand', scale = 1.5, w = 48, h = 74 }: { id: string; pose?: Pose; scale?: number; w?: number; h?: number }) {
+export function Person({ id, look, pose = 'stand', scale = 1.5, w = 48, h = 74 }: { id: string; look?: PersonLook; pose?: Pose; scale?: number; w?: number; h?: number }) {
   return (
     <Svg w={w} h={h}>
       <g transform={`translate(${w / 2} ${h - 4}) scale(${scale})`}>
-        <StaffFigure id={id} pose={pose} tired={false} />
+        <StaffFigure id={id} look={look} pose={pose} tired={false} />
       </g>
     </Svg>
   );
@@ -190,13 +191,27 @@ export function SpecialitySymbol({ s }: { s: Speciality }) {
 // Equipment: before and after
 // ---------------------------------------------------------------------------
 
-export type EquipId = 'till3' | 'shelfProduce' | 'shelfAmbient' | 'chilled' | 'shelfChilled' | 'fridge';
+export type EquipId = 'till3' | 'shelfProduce' | 'shelfAmbient' | 'chilled' | 'shelfChilled' | 'fridge' | 'breakRoom';
 
 /** The equipment drawn as it would be installed (`after`) or as it is now. */
 export function EquipArt({ id, after, w = 88, h = 54 }: { id: EquipId; after: boolean; w?: number; h?: number }) {
   return (
     <Svg w={w} h={h}>
       <g transform={`scale(${w / 88} ${h / 54})`}>
+        {id === 'breakRoom' && (
+          <g>
+            <rect x="6" y="20" width="36" height="16" rx="5" fill="var(--burgundy)" />
+            <rect x="4" y="30" width="40" height="10" rx="4" fill="var(--burgundy-dark)" />
+            {after && (
+              <g>
+                <rect x="48" y="20" width="36" height="16" rx="5" fill="var(--burgundy)" />
+                <rect x="46" y="30" width="40" height="10" rx="4" fill="var(--burgundy-dark)" />
+              </g>
+            )}
+            <rect x="34" y="6" width="20" height="10" rx="2" fill="var(--wood)" />
+            <circle cx="40" cy="5" r="2.5" fill="var(--paper)" stroke="var(--muted)" />
+          </g>
+        )}
         {id === 'till3' &&
           [0, 1, 2].map((i) =>
             i < 2 || after ? (

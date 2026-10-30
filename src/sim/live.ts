@@ -298,9 +298,11 @@ export function advance(input: Live, minutes: number): { live: Live; reports: Ho
     const now = stepOf(live.state);
     const nextBreakEnd = Object.values(live.breakUntil).reduce((m, t) => Math.min(m, t), Infinity);
     const nextEvent = live.state.floor?.events[0]?.at ?? Infinity;
+    // Someone hired this morning walks in at their minute.
+    const nextArrival = live.state.staff.reduce((m, s) => (s.availableFromStep !== undefined && s.availableFromStep > now ? Math.min(m, s.availableFromStep) : m), Infinity);
     // While someone is on a floor job, go a minute at a time so they head back the minute it's done.
     const working = live.state.floor?.tasks.some((t) => t.assigned !== null) ? 1 : Infinity;
-    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now, nextEvent - now, working));
+    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now, nextEvent - now, nextArrival - now, working));
     const r = runSteps(live.state, live.plan, n);
     reports.push(r.report);
     live = raiseDue(settle({ ...live, state: r.state }));
@@ -383,6 +385,17 @@ export function choose(input: Live, c: Choice): Live {
       return { ...live, plan: { ...live.plan, pricing: { ...c.pricing } } };
     case 'action': {
       const state = takeAction(live.state, c.action);
+      if (c.action.kind === 'letGo') {
+        // They leave now: off the plan, and whoever they were covering for carries on.
+        const id = c.action.staffId;
+        const assignments = { ...live.plan.assignments };
+        delete assignments[id];
+        const breakUntil = { ...live.breakUntil };
+        delete breakUntil[id];
+        const returnTo = { ...live.returnTo };
+        delete returnTo[id];
+        return settle({ ...live, state, plan: { ...live.plan, assignments }, breakUntil, returnTo });
+      }
       if (c.action.kind !== 'cashAndCarry') return { ...live, state };
       // Off to the cash-and-carry: back to their job when the run is done.
       const id = c.action.staffId;

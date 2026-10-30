@@ -29,12 +29,14 @@ interface Props {
   accountsExtra?: ReactNode;
   /** Figures only, with no targets, ticks or crosses (your shop has no pass or fail). */
   plain?: boolean;
+  /** Your shop: wages paid at closing. */
+  wages?: number;
 }
 
 type Tab = 'accounts' | 'operations' | 'team';
 
 /** Closing time: a compact result first, the full report on request. */
-export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra, plain }: Props) {
+export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra, plain, wages }: Props) {
   const s = summarise(state, targets);
   const [report, setReport] = useState(false);
   const [tab, setTab] = useState<Tab>('accounts');
@@ -76,6 +78,7 @@ export function Closing({ state, targets, title, kicker, cash, primary, others =
           {cash !== undefined && (
             <span className="result-cash">
               Cash <strong>{money(cash)}</strong>
+              {wages !== undefined && <span className="muted"> · wages paid {money(wages)}</span>}
             </span>
           )}
           <button type="button" className="btn-primary btn-run" onClick={primary.onClick} autoFocus>

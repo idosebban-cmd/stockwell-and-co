@@ -358,7 +358,7 @@ describe('supplier credit', () => {
 describe('default plans', () => {
   it('are valid every hour of every day, with hires and only the tills that are installed', () => {
     let c = newCampaign(1);
-    const hires: Record<number, string[]> = { 0: ['hire:bev', 'hire:tomasz'], 2: ['chilled', 'hire:dougie'] };
+    const hires: Record<number, string[]> = { 0: ['hire:bev', 'hire:tomasz'], 2: ['chilled', 'breakRoom', 'hire:dougie'] };
     while (c.day < WEEK_DAYS) {
       let state = startCampaignDay(c, recommendOrder(c));
       while (state.hour < state.ctx.hours) {

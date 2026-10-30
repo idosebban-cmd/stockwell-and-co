@@ -37,6 +37,33 @@ export const ASSIGNMENTS: readonly AssignmentId[] = [
 
 export type Speciality = 'checkout' | 'calm' | 'produce' | 'chilled' | 'stamina' | 'receiving' | 'none';
 
+export type TraitId = 'morningPerson' | 'nightOwl' | 'chatty' | 'dislikesStockroom' | 'steady' | 'tidy';
+
+/** Jobs a person has a skill level in (1–5). Stored now; levelling up comes with staff growth. */
+export type SkillJob = 'tills' | 'shelves' | 'unloading' | 'floor';
+
+export interface PersonLook {
+  skin: string;
+  hair: string;
+  style: 'ponytail' | 'perm' | 'short' | 'messy' | 'bun' | 'beanie' | 'cap';
+  beard?: string;
+  glasses?: boolean;
+}
+
+/** Someone who can work in the shop: the starting team, the old regulars and generated candidates. */
+export interface Person {
+  id: string;
+  name: string;
+  speciality: Speciality;
+  traits: TraitId[];
+  skills: Record<SkillJob, number>;
+  /** Pounds an hour. */
+  wage: number;
+  look?: PersonLook;
+  startEnergy: number;
+  bio: string;
+}
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -59,6 +86,15 @@ export interface StaffMember {
   restRun?: number;
   /** A break was completed during the current hour. */
   breakThisHour?: boolean;
+  traits?: TraitId[];
+  skills?: Record<SkillJob, number>;
+  /** Pounds an hour (default `wagePerHour`). */
+  wage?: number;
+  look?: PersonLook;
+  /** In their first days: a little slower. */
+  newcomer?: boolean;
+  /** Hired today: on shift from this step (they walk in through the front door). */
+  availableFromStep?: number;
 }
 
 export interface PendingDelivery {
@@ -116,6 +152,9 @@ export type ActionRequest =
   | { kind: 'nextDelivery'; dept: DeptId; qty: number }
   /** Accept that a department will run out today (no more warnings). */
   | { kind: 'letRunOut'; dept: DeptId }
+  /** Hire someone from the morning's pool (your shop). */
+  | { kind: 'hire'; person: Person }
+  | { kind: 'letGo'; staffId: string }
   | { kind: 'temp' }
   | { kind: 'repair' };
 
@@ -180,6 +219,9 @@ export interface DayContext {
   actions: ActionRequest['kind'][];
   /** Whether prices can be changed today. */
   pricing: boolean;
+  /** Team size the shop can take (your shop), and how many fit in the break room at once. */
+  teamLimit?: number;
+  breakCap?: number;
   /** Extra minutes of queue patience (the generous first days). */
   patienceBonus?: number;
   /** Scales satisfaction penalties from floor jobs and answers (the generous first days). */
@@ -215,6 +257,12 @@ export interface SimState {
   idCounter: number;
   /** Owed to the wholesaler for stock bought on account; repaid from takings. */
   credit?: number;
+  /** Hired today: who, and whether they started today or start tomorrow. */
+  hires?: { person: Person; today: boolean }[];
+  /** Let go today. */
+  leavers?: string[];
+  /** Wages earned today, paid at closing (your shop). */
+  wagesDue?: number;
   /** Ordered during the day for tomorrow morning: on the dock at opening. */
   tomorrow?: { dept: DeptId; qty: number; unitCost: number; life?: ChilledLife }[];
   /** Life on the shop floor: bursts, small jobs and questions (live play). */

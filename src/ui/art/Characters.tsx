@@ -2,7 +2,7 @@
  * Small front-view characters drawn in SVG. Coordinates are relative to the
  * figure's feet (0, 0); a standing staff member is about 44 units tall.
  */
-import type { AssignmentId } from '../../sim/types';
+import type { AssignmentId, PersonLook } from '../../sim/types';
 
 type Hair = 'ponytail' | 'perm' | 'short' | 'messy' | 'bun' | 'beanie' | 'cap';
 
@@ -83,8 +83,9 @@ export function poseFor(a: AssignmentId, working: boolean): Pose {
 }
 
 /** A staff member at their feet position. */
-export function StaffFigure({ id, pose, tired }: { id: string; pose: Pose; tired: boolean }) {
-  const l = LOOKS[id] ?? LOOKS.temp;
+export function StaffFigure({ id, pose, tired, look }: { id: string; pose: Pose; tired: boolean; look?: PersonLook }) {
+  // New people carry their own look; the original six and the temp are drawn by id.
+  const l: Look = look ? { ...look, tabard: 'var(--burgundy)' } : (LOOKS[id] ?? LOOKS.temp);
   const sit = pose === 'sit';
   const lift = sit ? 8 : 0;
   return (
