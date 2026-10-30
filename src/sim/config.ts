@@ -67,12 +67,12 @@ export const CONFIG = {
   floor: {
     bursts: {
       /** Expected bursts per trading hour, scaled by how busy the hour is relative to `busyAt` customers. */
-      perHour: 0.6,
+      perHour: 0.45,
       busyAt: 40,
       maxPerHour: 1,
       minGapMinutes: 30,
-      /** Announced at the door this many minutes before the first shopper arrives (about 4 real seconds at 1x). */
-      warnMinutes: 4,
+      /** Announced at the door this many minutes before the first shopper arrives (about 12 real seconds at 1x). */
+      warnMinutes: 12,
       /** Shoppers arrive over this many minutes. */
       minutes: [6, 10] as [number, number],
       /** Extra shoppers as a share of the hour's forecast, at least `minShoppers`. */
@@ -81,9 +81,9 @@ export const CONFIG = {
     },
     tasks: {
       /** Expected new jobs per trading hour: a base plus a share per forecast customer. */
-      perHour: 0.45,
-      perCustomer: 0.008,
-      minGapMinutes: 6,
+      perHour: 0.3,
+      perCustomer: 0.005,
+      minGapMinutes: 15,
       /** The first job of the day appears within this many minutes of opening, so there's something to do from the start. */
       firstWithinMinutes: 15,
       /** What a shopper needing help is looking for, by department. */
@@ -93,7 +93,7 @@ export const CONFIG = {
         ambient: ['tea bags', 'gravy granules', 'tinned chickpeas', 'birthday candles', 'golden syrup'],
       } as Record<DeptId, string[]>,
       /** Never more than this many open at once (new ones wait). */
-      maxOpen: 3,
+      maxOpen: 2,
       /** Satisfaction lost each minute, per open job nobody is on, capped in total. */
       maxPenalty: 12,
       kinds: {
@@ -109,13 +109,15 @@ export const CONFIG = {
     /** Questions that pause the day. Kinds and their numbers; at most `maxPerDay`. */
     events: {
       perHour: 0.4,
-      maxPerDay: 3,
-      minGapMinutes: 50,
+      maxPerDay: 2,
+      minGapMinutes: 90,
+      /** A surprise due during a burst, or while jobs wait on the floor, comes this much later. */
+      waitMinutes: 10,
       firstAfterMinutes: 20,
       breakRequest: { minutes: 10, refusedStrain: 4, grantedStrainRelief: 2 },
       favour: { cost: 3, mood: 3, refusedMood: -2, moodMinutes: 60 },
       nearDate: { qty: 100, costShare: 0.5, days: 1 },
-      complaint: { voucher: 5, voucherMood: 3, apologyMood: 1, brushOffMood: -3, moodMinutes: 45 },
+      complaint: { voucher: 5, voucherMood: 3, apologyMood: 1, moodMinutes: 45 },
       donation: { cost: 20, mood: 3, moodMinutes: 180 },
     },
   },

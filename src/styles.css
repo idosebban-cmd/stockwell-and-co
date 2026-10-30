@@ -4189,3 +4189,410 @@ ul.tannoy {
   margin: 0 0 8px;
   font-weight: 700;
 }
+
+/* ---------------------------------------------------------------------------
+   Batch 2: show, don't tell
+   ------------------------------------------------------------------------- */
+
+/* Top bar: day, sun, cash, speeds, icons */
+.statusbar {
+  gap: 14px;
+  min-height: 60px;
+}
+.bar-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.day-pill {
+  font-size: 1.15rem;
+  font-weight: 800;
+  background: var(--mustard-soft);
+  color: var(--ink);
+  padding: 5px 16px;
+  border-radius: 999px;
+}
+.sun-arc {
+  display: block;
+}
+.bar-spacer {
+  flex: 1;
+}
+.cash-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff7e0;
+  border: 2px solid var(--mustard);
+  border-radius: 999px;
+  padding: 3px 16px 3px 5px;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+.cash-pill .bad {
+  color: var(--bad);
+}
+.speeds {
+  display: flex;
+  gap: 6px;
+}
+.speed-btn,
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--burgundy);
+  box-shadow: 0 4px 0 var(--line-strong);
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+.speed-btn {
+  width: 50px;
+  height: 44px;
+  border-radius: 13px;
+}
+.speed-btn svg {
+  fill: var(--burgundy);
+}
+.speed-btn.on {
+  background: var(--burgundy);
+  border-color: var(--burgundy);
+  box-shadow: 0 4px 0 var(--burgundy-dark);
+}
+.speed-btn.on svg {
+  fill: var(--paper);
+}
+.speed-btn:active,
+.icon-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--line-strong);
+}
+.speed-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.bar-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+}
+.save-warn {
+  font-size: 0.8rem;
+  color: var(--bad);
+  font-weight: 700;
+}
+
+/* The shop fills the space: no bar under it */
+.store-stage {
+  width: min(100%, calc((100vh - 96px) * 1000 / 700));
+}
+.btn-big {
+  font-size: 1.3rem;
+  padding: 14px 34px;
+  border-radius: 16px;
+}
+
+/* Speech bubbles */
+.speech rect,
+.speech path {
+  fill: #fffaf0;
+  stroke-width: 3;
+}
+.speech .speech-gap {
+  stroke: none;
+}
+.speech text {
+  font-size: 17px;
+  font-weight: 800;
+}
+.speech-bad rect,
+.speech-bad path {
+  stroke: var(--bad);
+}
+.speech-bad text {
+  fill: var(--bad);
+}
+.speech-warn rect,
+.speech-warn path {
+  fill: #ffe9a8;
+  stroke: var(--burgundy);
+}
+.speech-warn .speech-gap {
+  fill: #ffe9a8;
+}
+.speech-warn text {
+  fill: var(--ink);
+}
+.speech.pop {
+  animation: bubble-pop 380ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  transform-box: fill-box;
+}
+@keyframes bubble-pop {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+.till-glow {
+  fill: rgba(242, 194, 58, 0.18);
+  stroke: #f2c23a;
+  stroke-width: 5;
+  stroke-dasharray: 12 8;
+  pointer-events: none;
+}
+.till-glow.pulse {
+  animation: glow 900ms ease-in-out infinite alternate;
+}
+@keyframes glow {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Faces and reactions */
+.mood circle:first-child {
+  stroke-width: 1.6;
+}
+.mood-happy circle:first-child {
+  fill: #ffd36b;
+  stroke: #a8740c;
+}
+.mood-grumpy circle:first-child {
+  fill: #ff9b6b;
+  stroke: var(--bad);
+}
+.hmph {
+  font-size: 13px;
+  font-weight: 900;
+  fill: var(--bad);
+  stroke: var(--paper);
+  stroke-width: 3px;
+  paint-order: stroke;
+}
+.yawn rect {
+  fill: #fffaf0;
+  stroke: #8a7a6a;
+  stroke-width: 2;
+}
+.yawn text {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--muted);
+}
+.yawn .zz {
+  font-size: 13px;
+  font-weight: 900;
+}
+.bouncy {
+  animation: bouncy 520ms ease-in-out infinite alternate;
+}
+@keyframes bouncy {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-4px);
+  }
+}
+.sleepy {
+  animation: sleepy 2.6s ease-in-out infinite;
+  transform-origin: 0 0;
+}
+@keyframes sleepy {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-4deg);
+  }
+}
+
+/* Side panel: a surprise card and the team */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-head h2 {
+  margin: 0;
+}
+.surprise-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #fffaf0;
+  border: 3px solid var(--line-strong);
+  box-shadow: 0 5px 0 var(--line);
+}
+.surprise-card h2 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+.surprise-card p {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+  color: var(--muted);
+}
+.surprise-card.tone-bad {
+  border-color: var(--bad);
+}
+.surprise-card.tone-bad h2 {
+  color: var(--bad);
+}
+.surprise-card.tone-warn {
+  border-color: var(--mustard);
+}
+.surprise-card.tone-calm h2 {
+  color: var(--good);
+}
+.surprise-pic {
+  flex-shrink: 0;
+}
+.team-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.team-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 16px;
+  border: 3px solid var(--line);
+  background: #fffaf0;
+  box-shadow: 0 4px 0 var(--line-strong);
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+.team-card:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--line-strong);
+}
+.team-card.on {
+  border-color: var(--mustard);
+  background: #fff3d0;
+}
+.team-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.team-face {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #f3e2c3;
+}
+.mood-mark {
+  position: absolute;
+  right: 2px;
+  top: 0;
+  font-weight: 900;
+  font-size: 1rem;
+}
+.mood-mark.bouncy {
+  color: var(--mustard);
+}
+.mood-mark.sleepy {
+  color: var(--muted);
+}
+.team-text {
+  display: flex;
+  flex-direction: column;
+}
+.team-text strong {
+  font-size: 1.2rem;
+}
+.team-text span {
+  color: var(--muted);
+}
+
+/* Surprises as picture cards */
+.event-card {
+  text-align: center;
+  max-width: 460px;
+}
+.event-card .event-art {
+  display: block;
+  margin: 0 auto;
+}
+.event-card h2 {
+  font-size: 1.7rem;
+  margin: 6px 0 4px;
+}
+.event-card .event-options {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.event-card .event-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 14px 10px;
+  border-radius: 16px;
+  border: 3px solid var(--line-strong);
+  box-shadow: 0 5px 0 var(--line-strong);
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+.event-card .event-option:active {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 var(--line-strong);
+}
+.event-card .event-option strong {
+  font-size: 1.15rem;
+}
+.event-card .event-option .event-cost {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--burgundy);
+}
+
+.reduced-motion .speech.pop,
+.reduced-motion .till-glow,
+.reduced-motion .bouncy,
+.reduced-motion .sleepy {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .speech.pop,
+  .till-glow,
+  .bouncy,
+  .sleepy {
+    animation: none !important;
+  }
+}

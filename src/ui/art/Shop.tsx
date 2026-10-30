@@ -281,7 +281,7 @@ function RoomBox({ x, w, label, children }: { x: number; w: number; label: strin
 
 const CRATE_FILL: Record<DeptId, string> = { produce: '#9fbf3b', chilled: '#b9dbe6', ambient: '#c99a63' };
 
-export function StockroomArt({ backroom, depts, detail, tags }: { backroom: Record<DeptId, number>; depts: DeptId[]; detail: string | null; tags?: Partial<Record<DeptId, string>> }) {
+export function StockroomArt({ backroom, depts }: { backroom: Record<DeptId, number>; depts: DeptId[] }) {
   const bays = (
     [
       ['produce', 24, 'Fruit & veg'],
@@ -311,18 +311,9 @@ export function StockroomArt({ backroom, depts, detail, tags }: { backroom: Reco
                   </g>
                 );
               })}
-              <text x={x + 52} y="140" textAnchor="middle" fontSize="11" fill={backroom[d] < 1 ? '#a3261c' : C.ink} fontWeight={backroom[d] < 1 || detail === d || detail === 'dock' ? 800 : 600}>
+              <text x={x + 52} y="140" textAnchor="middle" fontSize="11" fill={C.ink} fontWeight={600}>
                 {label}
-                {backroom[d] < 1 ? ': none' : detail === d || detail === 'dock' ? `: ${Math.round(backroom[d])}` : ''}
               </text>
-              {tags?.[d] && (
-                <g transform={`translate(${x + 52} 48)`}>
-                  <rect x={-Math.max(44, tags[d]!.length * 2.9 + 8)} y="-9" width={Math.max(88, tags[d]!.length * 5.8 + 16)} height="17" rx="8" fill="#e3f1df" stroke="#2f7a45" strokeWidth="1.5" />
-                  <text y="4" textAnchor="middle" fontSize="9.5" fontWeight="800" fill={C.ink}>
-                    {tags[d]}
-                  </text>
-                </g>
-              )}
             </g>
           );
         })}
@@ -331,11 +322,11 @@ export function StockroomArt({ backroom, depts, detail, tags }: { backroom: Reco
   );
 }
 
-export function DockArt({ dock, lorry, detail }: { dock: number; lorry: boolean; detail: boolean }) {
+export function DockArt({ dock, lorry }: { dock: number; lorry: boolean }) {
   const n = Math.min(8, Math.ceil(dock / 120));
   return (
     <g aria-hidden="true">
-      <RoomBox x={388} w={172} label={dock > 0 && detail ? `DOCK · ${Math.round(dock).toLocaleString('en-GB')}` : 'DOCK'}>
+      <RoomBox x={388} w={172} label="DOCK">
         <rect x="402" y="38" width="144" height="74" rx="3" fill="#bdb2a0" {...ol} />
         {Array.from({ length: 7 }, (_, i) => (
           <rect key={i} x="406" y={42 + i * 10} width="136" height="6" rx="1" fill="#d3c8b5" />
@@ -366,6 +357,10 @@ export function DockArt({ dock, lorry, detail }: { dock: number; lorry: boolean;
 }
 
 export function OfficeArt({ clock, hiring }: { clock: string; hiring: boolean }) {
+  const m = /^(\d{2}):(\d{2})$/.exec(clock);
+  const mins = m ? Number(m[2]) : 0;
+  const hrs = m ? (Number(m[1]) % 12) + mins / 60 : 9;
+  const hand = (turns: number, len: number) => `M660 56 L${660 + Math.sin(turns * 2 * Math.PI) * len} ${56 - Math.cos(turns * 2 * Math.PI) * len}`;
   return (
     <g aria-hidden="true">
       <RoomBox x={572} w={122} label="OFFICE">
@@ -373,9 +368,9 @@ export function OfficeArt({ clock, hiring }: { clock: string; hiring: boolean })
         <circle cx="614" cy="86" r="2.6" fill={C.mustard} />
         <rect x="588" y="52" width="28" height="22" rx="2" fill="rgba(255,240,215,0.35)" />
         <circle cx="660" cy="56" r="20" fill="#fffaf0" stroke={C.burgundy} strokeWidth="4" />
-        <text x="660" y="61" textAnchor="middle" fontSize="11.5" fontWeight="900" fill={C.burgundy}>
-          {clock}
-        </text>
+        <path d={hand(hrs / 12, 9)} stroke={C.ink} strokeWidth="3" strokeLinecap="round" />
+        <path d={hand(mins / 60, 14)} stroke={C.ink} strokeWidth="2" strokeLinecap="round" />
+        <circle cx="660" cy="56" r="2" fill={C.burgundy} />
         <rect x="634" y="84" width="52" height="34" rx="2" fill="#d9c49a" {...ol} />
         <rect x="639" y="89" width="18" height="11" fill="#fff" />
         <rect x="660" y="91" width="20" height="13" fill={hiring ? '#f3dc9a' : '#fff'} />
@@ -648,10 +643,6 @@ export function AislesArt({ fill, gondolas, promo }: { fill: number; gondolas: L
             })}
             <rect x={g.x - 10} y={g.y - 2} width="12" height={g.faceH + 16} rx="3" fill={promo ? C.mustard : C.wood} {...ol} />
             <rect x={g.x + g.w - 2} y={g.y - 2} width="12" height={g.faceH + 16} rx="3" fill={promo ? C.mustard : C.wood} {...ol} />
-            <circle cx={g.x - 4} cy={g.y + 8} r="8" fill={C.burgundy} />
-            <text x={g.x - 4} y={g.y + 11.5} textAnchor="middle" fontSize="10" fontWeight="800" fill={C.cream}>
-              {gi + 1}
-            </text>
           </g>
         );
       })}
@@ -660,7 +651,7 @@ export function AislesArt({ fill, gondolas, promo }: { fill: number; gondolas: L
 }
 
 /** One checkout lane's counter (drawn per lane, so the queue in front of it overlaps correctly). */
-export function TillCounter({ y, n, on }: { y: number; n: number; on: boolean }) {
+export function TillCounter({ y, on }: { y: number; on: boolean }) {
   return (
     <g aria-hidden="true" opacity={on ? 1 : 0.62}>
       <ellipse cx="840" cy={y + 50} rx="104" ry="7" fill={C.shadow} />
@@ -670,10 +661,6 @@ export function TillCounter({ y, n, on }: { y: number; n: number; on: boolean })
       <rect x="752" y={y + 3} width="110" height="10" rx="3" fill="url(#belt)" />
       <rect x="884" y={y - 14} width="34" height="18" rx="3" fill="#3a3330" {...ol} />
       <rect x="888" y={y - 11} width="26" height="8" fill={on ? '#7cd38a' : '#77716c'} />
-      <circle cx="732" cy={y + 22} r="10" fill={on ? C.burgundy : '#8a7a6a'} />
-      <text x="732" y={y + 26} textAnchor="middle" fontSize="11" fontWeight="800" fill={C.cream}>
-        {n}
-      </text>
       {!on && (
         <text x="690" y={y + 40} textAnchor="middle" fontSize="11" fontWeight="800" fill="#6d5b4b">
           Closed
@@ -717,11 +704,6 @@ export function EntranceArt({ dropped, ring, motion }: { dropped: number; ring: 
           <rect x="0.5" y="-8.5" width="3" height="3.5" fill="#9cc7d6" />
         </g>
       ))}
-      {dropped >= 1 && (
-        <text x="310" y="660" textAnchor="middle" fontSize="9" fill="#b3362c" fontWeight="800">
-          left behind
-        </text>
-      )}
     </g>
   );
 }

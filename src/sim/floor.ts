@@ -27,11 +27,11 @@ function burstKind(clockHour: number, weekday: number, r: number): Burst['kind']
 }
 
 export const BURST_TEXT: Record<Burst['kind'], { cue: string; arriving: string }> = {
-  bus: { cue: 'A bus is pulling up', arriving: 'Bus passengers coming in' },
-  school: { cue: 'School’s out: parents on the way', arriving: 'School-run rush' },
-  church: { cue: 'Church is letting out', arriving: 'After-church crowd' },
-  lunch: { cue: 'Lunch break crowd heading over', arriving: 'Lunchtime rush' },
-  coach: { cue: 'A coach party has stopped', arriving: 'Coach party in the aisles' },
+  bus: { cue: 'Bus coming!', arriving: 'Here they come!' },
+  school: { cue: 'School’s out!', arriving: 'Here they come!' },
+  church: { cue: 'Church crowd!', arriving: 'Here they come!' },
+  lunch: { cue: 'Lunch rush!', arriving: 'Here they come!' },
+  coach: { cue: 'Coach party!', arriving: 'Here they come!' },
 };
 
 export const TASK_KINDS = Object.keys(F.tasks.kinds) as TaskKind[];
@@ -160,19 +160,8 @@ export function helpItem(t: FloorTask): string {
  * time that matters (until the shopper gives up, or the work it takes; once
  * someone is on it, who and how long to go).
  */
-export function taskText(t: FloorTask, now: number, worker?: string): string {
-  const what =
-    t.kind === 'help'
-      ? `Can’t find ${helpItem(t)}`
-      : t.kind === 'spill'
-        ? 'Spill to mop'
-        : t.kind === 'priceCheck'
-          ? 'Price check'
-          : t.kind === 'pallet'
-            ? 'Cage blocking aisle'
-            : 'Baskets running out';
-  if (t.kind === 'errand') return `${worker ?? 'Someone'} at the cash-and-carry · back in ${Math.max(1, Math.ceil(t.work - t.progress))} min`;
-  if (t.assigned) return `${worker ?? 'Someone'} on it · ${Math.max(1, Math.ceil(t.work - t.progress))} min to go`;
-  if (t.expiresAt !== null) return `${what} · ${Math.max(1, t.expiresAt - now)} min left`;
-  return `${what} · ${t.work} min job`;
+/** The job's bubble in the shop: a few words. */
+export function taskText(t: FloorTask, _now: number, _worker?: string): string {
+  if (t.assigned) return 'On it!';
+  return t.kind === 'help' ? 'Help me!' : t.kind === 'spill' ? 'Spill!' : t.kind === 'priceCheck' ? 'Price check!' : t.kind === 'pallet' ? 'Boxes in the way!' : 'No baskets!';
 }

@@ -42,7 +42,7 @@ describe('chilled stays out of the shop until it is bought', () => {
           const ev = st.floor?.pending;
           if (ev) {
             const card = describeEvent(st, ev);
-            if (ev.dept === 'chilled' || mentions(`${card.title} ${card.text} ${card.options.map((o) => `${o.label} ${o.effect}`).join(' ')}`)) problems.push(`${at}: question about chilled`);
+            if (ev.dept === 'chilled' || mentions(`${card.title} ${card.options.map((o) => o.label).join(' ')}`)) problems.push(`${at}: question about chilled`);
           }
         });
         // Nobody wanted, picked or was sold chilled all day.

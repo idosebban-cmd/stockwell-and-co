@@ -6,12 +6,11 @@ import { getStorage, loadMode, saveMode } from './sim/save';
 import { useCampaign } from './ui/useCampaign';
 import { useSettings } from './ui/useSettings';
 import type { LiveDay } from './ui/useLiveDay';
-import { StatusBar, type CampaignStatus } from './ui/StatusBar';
-import { GamePanel } from './ui/PlanPanel';
-import { GameTools } from './ui/ActionTools';
+import { StatusBar } from './ui/StatusBar';
+import { SidePanel } from './ui/SidePanel';
+import type { Clock } from './ui/useClock';
 import { Opening } from './ui/Opening';
 import { Closing } from './ui/Closing';
-import { ClockControls } from './ui/ClockControls';
 import { dayKicker, Investments, MorningScreen, ValueLines, ValueSummary } from './ui/CampaignScreens';
 import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
@@ -24,6 +23,14 @@ import { stepOf } from './sim/live';
 import type { SimState } from './sim/types';
 
 type AppMode = 'home' | 'campaign';
+
+/** What the top bar shows. */
+interface BarInfo {
+  day?: string;
+  state?: SimState;
+  cash?: number;
+  clock?: Clock;
+}
 
 export default function App() {
   const storage = useMemo(() => getStorage(), []);
@@ -57,10 +64,12 @@ export default function App() {
   };
 
   const sound = { on: settings.sound, toggle: () => setSettings({ sound: !settings.sound }) };
-  const bar = (state: SimState | null, campaign?: CampaignStatus) => (
+  const bar = (top: BarInfo = {}) => (
     <StatusBar
-      state={state}
-      campaign={campaign}
+      day={top.day}
+      state={top.state}
+      cash={top.cash}
+      clock={top.clock}
       saveOk={week.saveOk}
       onHelp={() => openDialog('help')}
       onSettings={() => openDialog('settings')}
@@ -85,7 +94,7 @@ export default function App() {
       </a>
       {mode === 'home' && (
         <>
-          {bar(null)}
+          {bar()}
           <Opening label={week.started ? `Play · ${weekdayName(week.camp.day)}` : 'Play'} onPlay={() => setMode('campaign')} notice={week.notice} onDismissNotice={week.dismissNotice} />
         </>
       )}
@@ -101,12 +110,12 @@ export default function App() {
 // Your shop, day after day
 // ---------------------------------------------------------------------------
 
-function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>; reduced: boolean; bar: (s: SimState | null, c?: CampaignStatus) => JSX.Element }) {
+function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>; reduced: boolean; bar: (top?: BarInfo) => JSX.Element }) {
   const { camp, state } = week;
   if (week.phase === 'morning')
     return (
       <>
-        {bar(null)}
+        {bar({ day: weekdayName(camp.day), cash: camp.cash })}
         <MorningScreen key={`${week.record.seed}-${camp.day}`} camp={camp} onOpen={week.openShop} reduced={reduced} />
       </>
     );
@@ -115,7 +124,7 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
     const after = week.closed.camp;
     return (
       <>
-        {bar(null)}
+        {bar({ day: weekdayName(camp.day), cash: after.cash })}
         <Closing
           key={`close-${camp.day}`}
           state={state}
@@ -133,10 +142,9 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
       </>
     );
   }
-  const status: CampaignStatus = { day: weekdayName(camp.day) };
   return (
     <>
-      {bar(state, status)}
+      {bar({ day: weekdayName(camp.day), state, cash: state.cash, clock: week.day.clock })}
       <LiveScreen day={week.day} state={state} reduced={reduced} camp={camp} />
     </>
   );
@@ -166,21 +174,12 @@ function LiveScreen({ day, state, reduced, camp }: { day: LiveDay; state: SimSta
     <ShopScreen
       state={state}
       plan={plan}
-      setPlan={(p) => void day.apply(p)}
-      phase="live"
-      report={null}
-      onRun={() => {}}
-      onReplayDone={() => {}}
+      live
       reduced={reduced}
-      replaySpeed="normal"
-      steps={CONFIG.stepsPerHour - (state.step ?? 0)}
-      primary={null}
       onMove={day.move}
       pops={day.pops}
       paused={day.clock.paused}
-      clock={<ClockControls clock={day.clock} state={state} />}
-      tools={(ctx) => <GameTools state={state} plan={plan} ctx={ctx} current={state.hour} planning />}
-      panel={(ctx) => <GamePanel state={state} plan={plan} onChange={ctx.onPlanChange} sel={ctx.sel} setSel={ctx.setSel} hiring={hiring} />}
+      panel={(ctx) => <SidePanel state={state} plan={plan} ctx={ctx} hiring={hiring} />}
       office={!!camp}
       floor={storeFloor(state)}
       onAssignTask={day.assignTask}
@@ -200,8 +199,8 @@ function storeFloor(state: SimState): StoreFloor {
     labels: Object.fromEntries(tasks.map((t) => [t.id, taskText(t, now, state.staff.find((s) => s.id === t.assigned)?.name)])),
     door: door
       ? door.inMinutes > 0
-        ? { text: BURST_TEXT[door.burst.kind].cue, detail: `About ${door.burst.shoppers} shoppers in ${door.inMinutes} min: open another till?`, arriving: false }
-        : { text: BURST_TEXT[door.burst.kind].arriving, detail: `About ${door.burst.shoppers} shoppers coming in`, arriving: true }
+        ? { text: BURST_TEXT[door.burst.kind].cue, arriving: false }
+        : { text: BURST_TEXT[door.burst.kind].arriving, arriving: true }
       : null,
   };
 }

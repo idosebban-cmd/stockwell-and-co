@@ -46,14 +46,8 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
     <ShopScreen
       state={preview}
       plan={plan}
-      setPlan={() => {}}
-      phase="plan"
-      report={null}
-      onRun={() => onOpen(order)}
-      onReplayDone={() => {}}
+      live={false}
       reduced={reduced}
-      replaySpeed="normal"
-      steps={6}
       interactive={false}
       primary={{ label: 'Open the shop ▶', onClick: () => onOpen(order) }}
       panel={() => (

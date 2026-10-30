@@ -13,7 +13,7 @@
  * Pure: no timers. The UI's clock calls `advance` once per in-game minute.
  */
 import { CONFIG, DEPTS, deptName, type DeptId, type PriceTier } from './config';
-import { assignmentLimit, defaultPlan, money, onShift, runSteps, takeAction, useByExpiry, weekdayName } from './engine';
+import { assignmentLimit, defaultPlan, onShift, runSteps, takeAction, useByExpiry, weekdayName } from './engine';
 import * as S from './stock';
 import type { ActionRequest, AssignmentId, FloorEvent, HourPlan, HourReport, SimState } from './types';
 
@@ -183,9 +183,16 @@ function routine(live: Live): Live {
 /** Raises the next question if its minute has come. */
 function raiseDue(live: Live): Live {
   const f = live.state.floor;
-  if (!f || f.pending || !f.events.length || f.events[0].at > stepOf(live.state) || isClosed(live)) return live;
+  const now = stepOf(live.state);
+  if (!f || f.pending || !f.events.length || f.events[0].at > now || isClosed(live)) return live;
   const state = structuredClone(live.state);
   const floor = state.floor!;
+  // A surprise waits for a calm moment: not during a burst, nor while jobs are waiting on the floor.
+  const burst = floor.bursts.some((b) => now >= b.warnAt && now < b.at + b.minutes);
+  if (burst || floor.tasks.filter((t) => !t.assigned && t.kind !== 'errand').length >= 2) {
+    floor.events[0].at = now + E.waitMinutes;
+    return { ...live, state };
+  }
   const ev = floor.events.shift()!;
   const filled = fillEvent(state, live.plan, ev);
   if (filled) floor.pending = filled;
@@ -215,65 +222,31 @@ function fillEvent(state: SimState, plan: HourPlan, ev: FloorEvent): FloorEvent 
   }
 }
 
+export type EventPicture = 'loaf' | 'grumpy' | 'raffle' | 'sleepy' | 'apples';
+export type AnswerIcon = 'yes' | 'no' | 'cake' | 'sorry' | 'gift';
+
+/** A surprise as a picture card: a few words and two picture answers (cash shown where an answer costs some). */
 export interface EventCard {
   title: string;
-  text: string;
-  options: { label: string; effect: string }[];
+  picture: EventPicture;
+  options: { label: string; icon: AnswerIcon; cost?: number }[];
 }
 
-/** What a question says and what each answer will do. */
 export function describeEvent(state: SimState, ev: FloorEvent): EventCard {
   const name = state.staff.find((s) => s.id === ev.staffId)?.name ?? 'Someone';
   switch (ev.kind) {
     case 'breakRequest':
-      return {
-        title: `${name} needs a breather`,
-        text: `${name} looks shattered and asks for ten minutes off the floor.`,
-        options: [
-          { label: 'Yes, go now', effect: `${name} rests for ${E.breakRequest.minutes} minutes, then goes back to work` },
-          { label: 'Not just now', effect: `${name} carries on, but it wears on them` },
-        ],
-      };
+      return { title: `${name} needs a rest!`, picture: 'sleepy', options: [{ label: 'Go on then', icon: 'yes' }, { label: 'Not now', icon: 'no' }] };
     case 'favour':
-      return {
-        title: 'A favour for a regular',
-        text: 'Mrs Patel, who comes in every day, asks if you could keep a loaf and half a dozen eggs back for her tomorrow.',
-        options: [
-          { label: 'Of course', effect: `${money(E.favour.cost)}; shoppers feel looked after (+${E.favour.mood} for an hour)` },
-          { label: 'Sorry, we can’t', effect: `Word gets round (${E.favour.refusedMood} for an hour)` },
-        ],
-      };
+      return { title: 'Keep Mrs Patel a loaf?', picture: 'loaf', options: [{ label: 'Of course!', icon: 'yes', cost: E.favour.cost }, { label: 'Sorry, no', icon: 'no' }] };
     case 'nearDate': {
       const d = ev.dept ?? 'produce';
-      const cost = E.nearDate.qty * C.departments[d].unitCost * E.nearDate.costShare;
-      return {
-        title: 'The wholesaler is on the phone',
-        text: `They have ${E.nearDate.qty} ${deptName(d).toLowerCase()} items near their date at half price, dropped at the dock now. Use by tomorrow.`,
-        options: [
-          { label: `Take them (${money(cost)})`, effect: `${E.nearDate.qty} items on the dock to unload and sell by tomorrow` },
-          { label: 'No thanks', effect: 'Nothing changes' },
-        ],
-      };
+      return { title: 'Cheap stock going!', picture: 'apples', options: [{ label: 'Take it', icon: 'yes', cost: E.nearDate.qty * C.departments[d].unitCost * E.nearDate.costShare }, { label: 'No thanks', icon: 'no' }] };
     }
     case 'complaint':
-      return {
-        title: 'A customer complaint',
-        text: `A customer at the counter is unhappy about ${ev.reason ?? 'their visit'}.`,
-        options: [
-          { label: `Apologise and give a ${money(E.complaint.voucher)} voucher`, effect: `${money(E.complaint.voucher)}; customers +${E.complaint.voucherMood} for 45 minutes` },
-          { label: 'Apologise', effect: `Customers +${E.complaint.apologyMood} for 45 minutes` },
-          { label: '“It’s busy, sorry”', effect: `Customers ${E.complaint.brushOffMood} for 45 minutes` },
-        ],
-      };
+      return { title: 'Grumpy customer!', picture: 'grumpy', options: [{ label: 'Free cake', icon: 'cake', cost: E.complaint.voucher }, { label: 'Say sorry', icon: 'sorry' }] };
     case 'donation':
-      return {
-        title: 'The school fête',
-        text: 'The primary school round the corner asks for a raffle prize for Saturday’s fête.',
-        options: [
-          { label: `Donate a hamper (${money(E.donation.cost)})`, effect: `Goodwill: customers +${E.donation.mood} for three hours` },
-          { label: 'Not this time', effect: 'Nothing changes' },
-        ],
-      };
+      return { title: 'School raffle prize?', picture: 'raffle', options: [{ label: 'Give a hamper', icon: 'gift', cost: E.donation.cost }, { label: 'Not this time', icon: 'no' }] };
   }
 }
 
@@ -311,20 +284,20 @@ function answer(live: Live, option: number): { live: Live; result: string } {
             returnTo: { ...live.returnTo, [staff.id]: was === 'task' ? (live.returnTo[staff.id] ?? 'tills') : (was ?? 'tills') },
           };
         }
-        result = `${staff.name} heads for the kettle and will be back in ${E.breakRequest.minutes} minutes.`;
+        result = 'Off for a cuppa!';
       } else if (staff) {
         staff.strain += E.breakRequest.refusedStrain;
-        result = `${staff.name} carries on, a bit flat.`;
+        result = 'Back to work…';
       }
       break;
     case 'favour':
       if (option === 0) {
         spend(E.favour.cost);
         mood(E.favour.mood, E.favour.moodMinutes, 'Kept a loaf for Mrs Patel');
-        result = 'Mrs Patel is delighted, and tells everyone in the queue.';
+        result = 'Mrs Patel is delighted!';
       } else {
         mood(E.favour.refusedMood, E.favour.moodMinutes, 'Said no to a regular');
-        result = 'Mrs Patel understands, but she mentions it to a few people.';
+        result = 'Mrs Patel tuts.';
       }
       break;
     case 'nearDate':
@@ -334,28 +307,25 @@ function answer(live: Live, option: number): { live: Live; result: string } {
         state.cash -= cost;
         state.ledger.stockPurchases += cost;
         S.add(state.stock[ev.dept].dock, [{ qty: E.nearDate.qty, unitCost: unit, expiresAt: useByExpiry(E.nearDate.days), label: `Use by ${weekdayName(state.ctx.weekday + E.nearDate.days)}` }]);
-        result = `${E.nearDate.qty} cheap ${deptName(ev.dept).toLowerCase()} items are on the dock. Someone needs to unload them.`;
-      } else result = 'You pass. The wholesaler tries the shop down the road.';
+        result = 'Bargain!';
+      } else result = 'Maybe next time!';
       break;
     case 'complaint':
       if (option === 0) {
         spend(E.complaint.voucher);
         mood(E.complaint.voucherMood, E.complaint.moodMinutes, 'Made up for a complaint');
-        result = 'The customer leaves smiling, voucher in hand.';
-      } else if (option === 1) {
-        mood(E.complaint.apologyMood, E.complaint.moodMinutes, 'Apologised to a customer');
-        result = 'The customer accepts the apology.';
+        result = 'All smiles again!';
       } else {
-        mood(E.complaint.brushOffMood, E.complaint.moodMinutes, 'Brushed off a complaint');
-        result = 'The customer tuts loudly enough for the whole queue to hear.';
+        mood(E.complaint.apologyMood, E.complaint.moodMinutes, 'Apologised to a customer');
+        result = 'Fair enough, they say.';
       }
       break;
     case 'donation':
       if (option === 0) {
         spend(E.donation.cost);
         mood(E.donation.mood, E.donation.moodMinutes, 'Donated to the school fête');
-        result = 'The school puts your name on the raffle poster.';
-      } else result = 'The school thanks you anyway.';
+        result = 'Thanks from the school!';
+      } else result = 'Maybe next year!';
       break;
   }
   floor.pending = null;

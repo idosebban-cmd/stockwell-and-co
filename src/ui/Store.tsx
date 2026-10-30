@@ -1,11 +1,12 @@
 import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { CONFIG, DEPTS, type DeptId } from '../sim/config';
 import type { DayContext } from '../sim/types';
-import { assignmentLimit, productivity } from '../sim/engine';
+import { productivity } from '../sim/engine';
 import { ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, FloorTask, StaffMember } from '../sim/types';
 import { poseFor, Shopper, StaffFigure } from './art/Characters';
 import { shopperFigures } from './shopperLayout';
+import type { ShopBubble } from './bubbles';
 import {
   AislesArt,
   Backdrop,
@@ -44,10 +45,10 @@ export const ZONE_JOB: Record<ZoneId, AssignmentId> = {
 
 export const ZONE_NAME: Record<ZoneId, string> = {
   produce: 'Fruit & veg',
-  chilled: 'Chilled food',
-  ambient: 'Cupboard essentials',
+  chilled: 'Chilled',
+  ambient: 'Cupboard',
   tills: 'Tills',
-  dock: 'Delivery dock',
+  dock: 'Dock',
   break: 'Break room',
 };
 
@@ -66,23 +67,9 @@ export interface StoreView {
   lorry: boolean;
   promo: DeptId[];
   markdown: DeptId[];
-  /** Short labels attached to a place in the shop, e.g. "Delivery: 12:00". */
-  notices: ShopNotice[];
-  /** Changes every replay step so walk-in animations restart. */
+  /** Changes every few minutes so walk-in animations restart. */
   tick: string;
   clock: string;
-}
-
-export interface ShopNotice {
-  zone: ZoneId;
-  text: string;
-  tone: 'info' | 'warn' | 'good' | 'bad';
-}
-
-/** What the selected employee would achieve at a place. */
-export interface JobHint {
-  text: string;
-  blocked: boolean;
 }
 
 export function fitFromContext(ctx: DayContext): ShopFit {
@@ -103,53 +90,35 @@ interface Props {
   view: StoreView;
   staff: StaffMember[];
   assignments: Record<string, AssignmentId>;
-  activity: Record<string, Activity>;
   selected: string | null;
   onSelectStaff: (id: string) => void;
   onZone: (a: AssignmentId) => void;
-  context: ZoneId | null;
-  onContext: (z: ZoneId | null) => void;
   interactive: boolean;
   animating: boolean;
   reducedMotion: boolean;
-  /** Places and people the current lesson points at. */
-  highlightZones?: ZoneId[];
-  highlightStaff?: string[];
-  /** Shown on each place while someone is selected. */
-  jobHints?: Partial<Record<ZoneId, JobHint>>;
-  /** Places with a problem worth opening. */
-  problemZones?: Partial<Record<ZoneId, 'urgent' | 'warn'>>;
-  /** The place whose panel is open: its counts are shown in the shop. */
-  detail?: ZoneId | null;
   fit: ShopFit;
   /** Live play: people can be dragged to a place, and walk there when moved. */
   onDrop?: (staffId: string, job: AssignmentId) => void;
   /** Coins popping up over the tills as they take money. */
   pops?: CoinPop[];
-  /** Live play: floor jobs and the cue at the door. */
+  /** Live play: floor jobs and the burst at the door. */
   floor?: StoreFloor;
-  /** Live play: send someone to a floor job (dropped on it, or the job chosen with them selected). With no one, says what it needs. */
+  /** Live play: send someone to a floor job (dropped on it, or chosen with them selected). */
   onTask?: (taskId: string, staffId: string | null) => void;
-  /** Live play: the stockroom opens the ordering panel; it shows orders on their way and a "!" when something will run out. */
-  stockroom?: StoreStockroom;
   /** Your shop: the office opens hiring. */
   office?: { onOpen: () => void; open: boolean };
-}
-
-export interface StoreStockroom {
-  onOpen: () => void;
-  open: boolean;
-  alert: 'urgent' | 'warn' | null;
-  /** "+60 arriving 11:20" per department. */
-  tags: Partial<Record<DeptId, string>>;
+  /** Problems as speech bubbles. */
+  bubbles?: ShopBubble[];
+  /** A long queue and a closed till: the closed till glows. */
+  glowTills?: boolean;
 }
 
 export interface StoreFloor {
   tasks: FloorTask[];
-  /** Each job's short label ("Can’t find tea bags · 3 min left"), by id. */
+  /** Each job's bubble ("Spill!"), by id. */
   labels: Record<string, string>;
   /** A burst announced at the door. */
-  door: { text: string; detail: string; arriving: boolean } | null;
+  door: { text: string; arriving: boolean } | null;
 }
 
 export function taskXY(t: FloorTask, L: Layout): [number, number] {
@@ -175,40 +144,10 @@ interface Drag {
   wasSelected: boolean;
 }
 
-/** Where each placed employee stands (viewBox units), for tips that point at someone. */
-export function staffPositions(staff: StaffMember[], assignments: Record<string, AssignmentId>, fit: ShopFit): Record<string, [number, number]> {
-  const SLOTS = layoutFor(fit).slots;
-  const counts = new Map<AssignmentId, number>();
-  const out: Record<string, [number, number]> = {};
-  for (const s of staff) {
-    const a = assignments[s.id];
-    if (!a) continue;
-    const i = counts.get(a) ?? 0;
-    counts.set(a, i + 1);
-    const slot = SLOTS[a][Math.min(i, SLOTS[a].length - 1)];
-    out[s.id] = [slot[0] + (i >= SLOTS[a].length ? 20 : 0), slot[1]];
-  }
-  return out;
-}
-
 export const STORE_SIZE = { w: 1000, h: 700 };
 
-function fillWord(f: number): string {
-  if (f < 0.02) return 'Empty';
-  if (f < 0.25) return 'Low';
-  if (f > 0.9) return 'Full';
-  return 'OK';
-}
-
-
 function StoreImpl(props: Props) {
-  const { view, staff, assignments, activity, selected, onSelectStaff, onZone, context, onContext, interactive, animating, reducedMotion } = props;
-  const highlightZones = props.highlightZones ?? [];
-  const highlightStaff = props.highlightStaff ?? [];
-  const hints = props.jobHints ?? {};
-  const problemZones = props.problemZones ?? {};
-  const detail = props.detail ?? null;
-  const fit = props.fit;
+  const { view, staff, assignments, selected, onSelectStaff, onZone, interactive, animating, reducedMotion, fit } = props;
   const L = layoutFor(fit);
   const SLOTS = L.slots;
   // The dock unloads itself, so it isn't a place to send people.
@@ -235,6 +174,7 @@ function StoreImpl(props: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const draggable = interactive && !!props.onDrop;
+  const t = hourOfDay(view.clock) / 12;
 
   const toSvg = (e: ReactPointerEvent): [number, number] => {
     const svg = svgRef.current;
@@ -245,10 +185,12 @@ function StoreImpl(props: Props) {
   };
   const zoneAt = (x: number, y: number) => zones.find((z) => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h);
   const taskAt = (x: number, y: number) =>
-    props.onTask ? props.floor?.tasks.find((t) => {
-      const [tx, ty] = taskXY(t, L);
-      return Math.hypot(x - tx, y - ty) < 38;
-    }) : undefined;
+    props.onTask
+      ? props.floor?.tasks.find((tk) => {
+          const [tx, ty] = taskXY(tk, L);
+          return Math.hypot(x - tx, y - ty) < 44;
+        })
+      : undefined;
   const dropTask = drag?.moved ? taskAt(drag.x, drag.y) : undefined;
   const dropZone = drag?.moved && !dropTask ? zoneAt(drag.x, drag.y) : undefined;
   const startDrag = (id: string, e: ReactPointerEvent) => {
@@ -271,9 +213,9 @@ function StoreImpl(props: Props) {
   const endDrag = () => {
     if (!drag) return;
     if (drag.moved) {
-      const t = taskAt(drag.x, drag.y);
+      const tk = taskAt(drag.x, drag.y);
       const z = zoneAt(drag.x, drag.y);
-      if (t) props.onTask?.(t.id, drag.id);
+      if (tk) props.onTask?.(tk.id, drag.id);
       else if (z) props.onDrop?.(drag.id, ZONE_JOB[z.z]);
     } else if (drag.wasSelected) onSelectStaff(drag.id);
     setDrag(null);
@@ -285,98 +227,65 @@ function StoreImpl(props: Props) {
       className={`store ${motion ? 'is-animating' : ''} ${drag?.moved ? 'is-dragging' : ''}`}
       viewBox={`0 0 ${W} ${H}`}
       role="group"
-      aria-label={`Plan of the shop. Select a department to see its controls, or ${draggable ? 'drag a staff member to a place, or ' : ''}select a staff member and then a zone to move them.`}
+      aria-label={`The shop. ${draggable ? 'Drag someone to a place, or s' : 'S'}elect someone, then a place.`}
       onPointerMove={drag ? moveDrag : undefined}
       onPointerUp={drag ? endDrag : undefined}
       onPointerCancel={drag ? () => setDrag(null) : undefined}
     >
-      <ShopDefs t={hourOfDay(view.clock) / 12} />
-      <Backdrop t={hourOfDay(view.clock) / 12} />
+      <ShopDefs t={t} />
+      <Backdrop t={t} />
 
-      <StockroomArt backroom={view.backroom} detail={detail} depts={fit.depts} tags={props.stockroom?.tags} />
-      <DockArt dock={view.dock} lorry={view.lorry} detail={detail === 'dock'} />
+      <StockroomArt backroom={view.backroom} depts={fit.depts} />
+      <DockArt dock={view.dock} lorry={view.lorry} />
       <OfficeArt clock={view.clock} hiring={!!props.office?.open} />
       <BreakRoomArt />
       <StreetWindow motion={!reducedMotion} />
 
-      {fit.depts.includes('produce') && <ProduceArt fill={view.shelf.produce / Math.max(1, view.shelfCap.produce)} rows={fit.produceRows} markdown={view.markdown.includes('produce')} />}
+      {fit.depts.includes('produce') && <ProduceArt fill={view.shelf.produce / Math.max(1, view.shelfCap.produce)} rows={fit.produceRows} markdown={false} />}
       {fit.cabinets > 0 ? (
-        <ChilledArt fill={view.shelf.chilled / Math.max(1, view.shelfCap.chilled)} cabinets={fit.cabinets} frost={fit.frost} fault={view.fridgeFault} markdown={view.markdown.includes('chilled')} />
+        <ChilledArt fill={view.shelf.chilled / Math.max(1, view.shelfCap.chilled)} cabinets={fit.cabinets} frost={fit.frost} fault={view.fridgeFault} markdown={false} />
       ) : (
         <ExpandSpot />
       )}
-      {fit.depts.includes('ambient') && <AislesArt fill={view.shelf.ambient / Math.max(1, view.shelfCap.ambient)} gondolas={L.gondolas} promo={view.promo.includes('ambient')} />}
+      {fit.depts.includes('ambient') && <AislesArt fill={view.shelf.ambient / Math.max(1, view.shelfCap.ambient)} gondolas={L.gondolas} promo={false} />}
       {L.laneY.slice(0, fit.tills).map((y, i) => (
-        <TillCounter key={i} y={y} n={i + 1} on={i < openTills} />
+        <TillCounter key={i} y={y} on={i < openTills} />
       ))}
       <FloorDecor />
       <EntranceArt dropped={view.dropped} ring={!!props.floor?.door?.arriving} motion={!reducedMotion} />
       <Vignette />
-      <DeptLabels view={view} detail={detail} fit={fit} L={L} />
-      <QueueLabel open={openTills} queue={view.queue} detail={detail === 'tills'} installed={fit.tills} />
+      {props.glowTills &&
+        L.laneY.slice(openTills, fit.tills).map((y) => <rect key={y} className={motion ? 'till-glow pulse' : 'till-glow'} x="736" y={y - 8} width="206" height="66" rx="14" aria-hidden="true" />)}
 
-      {/* Zones: select a department, or place the selected employee */}
+      {/* Places: drop someone here, or select someone and then the place */}
       {zones.map((zone) => {
         const a = ZONE_JOB[zone.z];
-        const n = counts.get(a) ?? 0;
-        const lim = a === 'tills' ? fit.tills : assignmentLimit(a);
-        const full = n >= lim;
-        const hint = selected ? hints[zone.z] : undefined;
-        const label = selected
-          ? `${ASSIGNMENT_LABEL[a]}: move ${selectedName} here (${n} of ${lim} staff)${full ? ', full' : ''}${hint ? `. ${hint.text}` : ''}`
-          : `${ZONE_NAME[zone.z]}: ${n} of ${lim} staff${problemZones[zone.z] ? ', needs attention' : ''}. Open.`;
         const activate = () => {
-          if (!interactive) return;
-          if (selected) onZone(a);
-          else onContext(context === zone.z ? null : zone.z);
+          if (interactive && selected) onZone(a);
         };
         return (
-          <g key={zone.z}>
-            <rect
-              className={`zone ${selected && interactive ? (hint?.blocked || (full && !props.onDrop) ? 'zone-armed zone-full' : 'zone-armed') : interactive ? 'zone-browse' : ''} ${context === zone.z ? 'zone-context' : ''} ${highlightZones.includes(zone.z) ? 'zone-lesson' : ''} ${dropZone?.z === zone.z ? 'zone-drop' : ''}`}
-              x={zone.x}
-              y={zone.y}
-              width={zone.w}
-              height={zone.h}
-              rx="10"
-              tabIndex={interactive ? 0 : -1}
-              role="button"
-              aria-label={label}
-              aria-pressed={!selected ? context === zone.z : undefined}
-              onClick={activate}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  activate();
-                }
-              }}
-            />
-            {selected && interactive && hint && <ZoneBadge x={zone.mark[0] - 46} y={zone.mark[1] - 9} n={n} lim={lim} />}
-          </g>
+          <rect
+            key={zone.z}
+            className={`zone ${selected && interactive ? 'zone-armed' : ''} ${dropZone?.z === zone.z ? 'zone-drop' : ''}`}
+            x={zone.x}
+            y={zone.y}
+            width={zone.w}
+            height={zone.h}
+            rx="10"
+            tabIndex={interactive && selected ? 0 : -1}
+            role={interactive && selected ? 'button' : undefined}
+            aria-label={interactive && selected ? `${ZONE_NAME[zone.z]}: move ${selectedName} here` : undefined}
+            onClick={activate}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                activate();
+              }
+            }}
+          />
         );
       })}
 
-      {props.stockroom && interactive && !selected && (
-        <rect
-          className={`zone zone-browse ${props.stockroom.open ? 'zone-context' : ''}`}
-          x={L.stockroom.x}
-          y={L.stockroom.y}
-          width={L.stockroom.w}
-          height={L.stockroom.h}
-          rx="10"
-          tabIndex={0}
-          role="button"
-          aria-pressed={props.stockroom.open}
-          aria-label={`Stockroom: order more stock${props.stockroom.alert ? ', something will run out soon' : ''}. Open.`}
-          onClick={props.stockroom.onOpen}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              props.stockroom!.onOpen();
-            }
-          }}
-        />
-      )}
       {props.office && interactive && !selected && (
         <rect
           className={`zone zone-browse ${props.office.open ? 'zone-context' : ''}`}
@@ -388,7 +297,7 @@ function StoreImpl(props: Props) {
           tabIndex={0}
           role="button"
           aria-pressed={props.office.open}
-          aria-label="Office: hire people. Open."
+          aria-label="Office: hire people"
           onClick={props.office.onOpen}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -398,31 +307,9 @@ function StoreImpl(props: Props) {
           }}
         />
       )}
-      {props.stockroom?.alert && !selected && <ProblemMark x={L.stockroomMark[0]} y={L.stockroomMark[1]} level={props.stockroom.alert} label="Stockroom" onOpen={interactive ? props.stockroom.onOpen : undefined} />}
-      <Notices L={L} notices={view.notices} onOpen={interactive ? (z) => onContext(z) : undefined} />
-      {!selected &&
-        zones.map((zone) =>
-          problemZones[zone.z] ? (
-            <ProblemMark
-              key={`pm-${zone.z}`}
-              x={zone.mark[0]}
-              y={zone.mark[1]}
-              level={problemZones[zone.z]!}
-              label={ZONE_NAME[zone.z]}
-              onOpen={interactive ? () => onContext(zone.z) : undefined}
-            />
-          ) : null,
-        )}
       <QueueFigures L={L} open={openTills} queue={view.queue} />
       <AisleShoppers L={L} view={view} motion={motion} depts={fit.depts} />
       <WalkOuts L={L} view={view} motion={motion} />
-
-      {selected &&
-        zones.map((zone) => {
-          const hint = hints[zone.z];
-          if (!hint) return null;
-          return <HintPill key={zone.z} zone={zone} hint={hint} />;
-        })}
 
       {props.floor && <FloorLayer L={L} floor={props.floor} selected={selected} interactive={interactive && !!props.onTask} target={dropTask?.id ?? null} onTask={props.onTask} motion={!reducedMotion} />}
       {props.pops && !reducedMotion && <CoinPops L={L} pops={props.pops} />}
@@ -432,23 +319,25 @@ function StoreImpl(props: Props) {
         return (
           <StaffToken
             entrance={L.entrance}
-            lesson={highlightStaff.includes(s.id)}
             key={s.id}
             s={s}
             a={a}
             x={dragging ? drag.x : x}
             y={dragging ? drag.y + 30 : y}
-            act={activity[s.id] ?? 'plan'}
             selected={selected === s.id}
             interactive={interactive}
             onClick={() => onSelectStaff(s.id)}
             onPointerDown={draggable ? (e) => startDrag(s.id, e) : undefined}
             walk={draggable && !dragging}
             dragging={!!dragging}
-            named={selected === s.id || highlightStaff.includes(s.id)}
+            motion={motion}
           />
         );
       })}
+
+      {props.bubbles?.map((b) => (
+        <SpeechBubble key={b.id} x={b.x} y={b.y} text={b.text} tone={b.tone} pop={motion} />
+      ))}
     </svg>
   );
 }
@@ -456,70 +345,62 @@ function StoreImpl(props: Props) {
 export const Store = memo(StoreImpl);
 
 // ---------------------------------------------------------------------------
-// Labels
+// Bubbles and faces
 // ---------------------------------------------------------------------------
 
-function DeptLabels({ view, detail, fit, L }: { view: StoreView; detail: ZoneId | null; fit: ShopFit; L: Layout }) {
-  const amb = L.zones.find((z) => z.z === 'ambient')!;
+/** A speech bubble whose tail points at (x, y). */
+function SpeechBubble({ x, y, text, tone, pop, icon }: { x: number; y: number; text: string; tone: 'bad' | 'warn' | 'good' | 'calm'; pop: boolean; icon?: 'bus' }) {
+  const w = text.length * 9.6 + 30 + (icon ? 34 : 0);
+  const h = 34;
   return (
-    <g>
-      {fit.depts.includes('produce') && <Level x={20} y={162} units={view.shelf.produce} cap={view.shelfCap.produce} label="Fruit & veg" tag={tagFor(view, 'produce')} detail={detail === 'produce'} />}
-      {fit.cabinets > 0 && <Level x={316} y={160} units={view.shelf.chilled} cap={view.shelfCap.chilled} label="Chilled" tag={tagFor(view, 'chilled')} detail={detail === 'chilled'} />}
-      {fit.depts.includes('ambient') && <Level x={330} y={amb.y + 2} units={view.shelf.ambient} cap={view.shelfCap.ambient} label="Cupboard essentials" tag={tagFor(view, 'ambient')} detail={detail === 'ambient'} />}
-    </g>
-  );
-}
-
-function QueueLabel({ open, queue, detail, installed }: { open: number; queue: number; detail: boolean; installed: number }) {
-  if (!detail && queue < 8) return null;
-  return (
-    <g aria-hidden="true">
-      <rect x="560" y="462" width="120" height="22" rx="7" fill="var(--paper)" stroke={queue >= 8 ? 'var(--bad)' : 'var(--line-strong)'} strokeWidth="1.5" />
-      <text x="620" y="477.5" textAnchor="middle" fontSize="11.5" fontWeight="800" fill={queue >= 8 ? 'var(--bad)' : 'var(--ink)'}>
-        Queue {Math.round(queue)}
-        {detail ? ` · ${open}/${installed} open` : ''}
-      </text>
-    </g>
-  );
-}
-
-/** Department name, with a small Low/Empty indicator; the count only while its panel is open. */
-function Level({ x, y, units, cap, label, tag, detail }: { x: number; y: number; w?: number; units: number; cap: number; label: string; tag?: string; detail: boolean }) {
-  const f = Math.max(0, Math.min(1, units / Math.max(1, cap)));
-  const word = fillWord(f);
-  const low = word === 'Empty' || word === 'Low';
-  const text = `${label}${tag ? ` · ${tag}` : ''}`;
-  const tw = text.length * 6.4 + 14;
-  const extra = detail ? `${Math.round(units)} / ${Math.round(cap)}` : low ? word : '';
-  const ew = extra.length * 6.6 + 14;
-  return (
-    <g aria-hidden="true">
-      <rect x={x} y={y} width={tw} height="20" rx="6" fill="var(--paper)" opacity="0.92" />
-      <text x={x + 7} y={y + 14} fontSize="11" fill="var(--burgundy-dark)" fontWeight="800">
+    <g className={`speech speech-${tone} ${pop ? 'pop' : ''}`} transform={`translate(${x} ${y})`} aria-hidden="true">
+      <rect x={-w / 2} y={-h - 12} width={w} height={h} rx="15" />
+      <path d="M-8 -13.5 L0 -1 L8 -13.5 Z" />
+      <rect className="speech-gap" x="-8" y="-16" width="16" height="4" />
+      {icon === 'bus' && (
+        <g transform={`translate(${-w / 2 + 10} ${-h - 3})`}>
+          <rect width="28" height="16" rx="4" fill="#c2452d" />
+          <rect x="3" y="3" width="6" height="5" fill="#cfe6ee" />
+          <rect x="11" y="3" width="6" height="5" fill="#cfe6ee" />
+          <rect x="19" y="3" width="6" height="5" fill="#cfe6ee" />
+          <circle cx="7" cy="17" r="3" fill="#2f1308" />
+          <circle cx="21" cy="17" r="3" fill="#2f1308" />
+        </g>
+      )}
+      <text x={icon ? 17 : 0} y={-h / 2 - 6} textAnchor="middle" dominantBaseline="middle">
         {text}
       </text>
-      {extra && (
-        <g>
-          <rect x={x + tw + 4} y={y + 1} width={ew} height="18" rx="9" fill={low ? 'var(--bad)' : 'var(--paper)'} stroke={low ? 'none' : 'var(--line-strong)'} />
-          <text x={x + tw + 4 + ew / 2} y={y + 14} textAnchor="middle" fontSize="11" fontWeight="800" fill={low ? '#fff' : 'var(--ink)'}>
-            {extra}
-          </text>
-        </g>
+    </g>
+  );
+}
+
+/** A little face over a shopper: happy, or grumpy (with a cloud). */
+function MoodFace({ x, y, mood }: { x: number; y: number; mood: 'happy' | 'grumpy' }) {
+  return (
+    <g className={`mood mood-${mood}`} transform={`translate(${x} ${y})`} aria-hidden="true">
+      <circle r="8.5" />
+      {mood === 'happy' ? (
+        <>
+          <circle cx="-3" cy="-1.5" r="1.3" fill="#2f1308" />
+          <circle cx="3" cy="-1.5" r="1.3" fill="#2f1308" />
+          <path d="M-4 2.5 q4 4.5 8 0" stroke="#2f1308" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          <path d="M-4.5 -3 l3 1.6 M4.5 -3 l-3 1.6" stroke="#2f1308" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M-4 4.5 q4 -4 8 0" stroke="#2f1308" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          <path d="M6 -12 q2.5 -3.5 5 0 q2.5 -3.5 5 0" stroke="#7a7470" strokeWidth="1.6" fill="none" />
+        </>
       )}
     </g>
   );
-}
-
-function tagFor(view: StoreView, d: DeptId): string | undefined {
-  const t = [view.markdown.includes(d) ? 'stickers' : '', view.promo.includes(d) ? 'promo' : ''].filter(Boolean).join(', ');
-  return t || undefined;
 }
 
 // ---------------------------------------------------------------------------
 // People
 // ---------------------------------------------------------------------------
 
-/** Queue split across open tills, one figure per customer (up to a lane's length). */
+/** Queue split across open tills, one figure per customer; the longer the wait, the grumpier. */
 function QueueFigures({ L, open, queue }: { L: Layout; open: number; queue: number }) {
   const lanes = Math.max(1, open);
   const total = Math.round(queue);
@@ -536,10 +417,8 @@ function QueueFigures({ L, open, queue }: { L: Layout; open: number; queue: numb
                 <Shopper n={lane * 31 + i} fill={0.85} />
               </g>
             ))}
-            {n > maxShown && (
-              <text x={L.queueFrontX - maxShown * L.queueGap + 4} y={y - 20} fontSize="11" fontWeight="800" fill="var(--bad)">
-                +{n - maxShown}
-              </text>
+            {Array.from({ length: Math.min(n, maxShown) }, (_, i) =>
+              i % 3 === 1 ? <MoodFace key={`f${i}`} x={L.queueFrontX - i * L.queueGap} y={y - 50} mood={n > 5 && i >= 3 ? 'grumpy' : 'happy'} /> : null,
             )}
           </g>
         );
@@ -548,19 +427,20 @@ function QueueFigures({ L, open, queue }: { L: Layout; open: number; queue: numb
   );
 }
 
-/** Shoppers browsing the departments the shop has (positions from `shopperFigures`). */
+/** Shoppers browsing the departments the shop has; every few show how they feel. */
 function AisleShoppers({ L, view, motion, depts }: { L: Layout; view: StoreView; motion: boolean; depts: DeptId[] }) {
   const figs = shopperFigures(view.arrivals, depts, view.emptyDepts, L.aisleWalks);
   if (!figs.length) return null;
   return (
     <g aria-hidden="true">
-      {figs.map(({ k, x, y, fill }) => (
+      {figs.map(({ k, x, y, fill, dept }) => (
         <g key={`${view.tick}-${k}`} transform={`translate(${x} ${y})`}>
           <g
             className={motion ? 'walk-in' : ''}
             style={{ ['--sx' as string]: `${L.entrance[0] - x}px`, ['--sy' as string]: `${L.entrance[1] - y}px`, animationDelay: `${(k % 7) * 70}ms` }}
           >
             <Shopper n={k + 3} fill={fill} />
+            {k % 3 === 0 && <MoodFace x={0} y={-50} mood={view.emptyDepts.includes(dept) ? 'grumpy' : 'happy'} />}
           </g>
         </g>
       ))}
@@ -579,6 +459,11 @@ function WalkOuts({ L, view, motion }: { L: Layout; view: StoreView; motion: boo
           <g key={`${view.tick}-out-${i}`} transform={`translate(${x} ${y})`}>
             <g className={motion ? 'walk-out' : ''} style={{ ['--ex' as string]: `${L.entrance[0] - x}px`, ['--ey' as string]: `${L.entrance[1] - y}px` }}>
               <Shopper n={i + 11} leaving />
+              {i === 0 && (
+                <text className="hmph" x="0" y="-48" textAnchor="middle">
+                  Hmph!
+                </text>
+              )}
             </g>
           </g>
         );
@@ -587,112 +472,9 @@ function WalkOuts({ L, view, motion }: { L: Layout; view: StoreView; motion: boo
   );
 }
 
-function HintPill({ zone, hint }: { zone: Layout['zones'][number]; hint: JobHint }) {
-  const x = zone.x + zone.w / 2;
-  const y = zone.y + zone.h / 2;
-  const w = hint.text.length * 6.6 + 24;
-  return (
-    <g className="hint-pill" aria-hidden="true" pointerEvents="none">
-      <rect x={x - w / 2} y={y - 13} width={w} height="26" rx="13" fill={hint.blocked ? 'var(--paper)' : 'var(--burgundy)'} stroke="var(--burgundy)" strokeWidth="2" />
-      <text x={x} y={y + 4.5} textAnchor="middle" fontSize="12" fontWeight="800" fill={hint.blocked ? 'var(--burgundy-dark)' : 'var(--paper)'}>
-        {hint.blocked ? '✕ ' : ''}
-        {hint.text}
-      </text>
-    </g>
-  );
-}
+const TASK_TONE: Record<FloorTask['kind'], 'bad' | 'warn'> = { spill: 'bad', help: 'warn', priceCheck: 'warn', pallet: 'warn', baskets: 'warn', errand: 'warn' };
 
-function ProblemMark({ x, y, level, label, onOpen }: { x: number; y: number; level: 'urgent' | 'warn'; label: string; onOpen?: () => void }) {
-  return (
-    <g
-      className={`${level === 'urgent' ? 'problem-mark urgent' : 'problem-mark'} ${onOpen ? 'notice-open' : ''}`}
-      role={onOpen ? 'button' : undefined}
-      tabIndex={onOpen ? 0 : undefined}
-      aria-label={onOpen ? `${label} needs attention. Open.` : undefined}
-      aria-hidden={onOpen ? undefined : true}
-      onClick={onOpen}
-      onKeyDown={
-        onOpen
-          ? (e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                onOpen();
-              }
-            }
-          : undefined
-      }
-    >
-      <circle cx={x} cy={y} r="14" fill="transparent" />
-      <circle cx={x} cy={y} r="10" fill={level === 'urgent' ? 'var(--bad)' : 'var(--mustard)'} stroke="var(--paper)" strokeWidth="2" />
-      <text x={x} y={y + 4.5} textAnchor="middle" fontSize="13" fontWeight="900" fill={level === 'urgent' ? '#fff' : 'var(--burgundy-dark)'}>
-        !
-      </text>
-    </g>
-  );
-}
-
-function Notices({ L, notices, onOpen }: { L: Layout; notices: ShopNotice[]; onOpen?: (z: ZoneId) => void }) {
-  const stack = new Map<ZoneId, number>();
-  return (
-    <g>
-      {notices.map((n, i) => {
-        const k = stack.get(n.zone) ?? 0;
-        stack.set(n.zone, k + 1);
-        const [x, y0] = L.noticeAt[n.zone];
-        const y = y0 + k * 24;
-        const w = n.text.length * 6.6 + 20;
-        return (
-          <g
-            key={i}
-            className={`notice notice-${n.tone} ${onOpen ? 'notice-open' : ''}`}
-            role={onOpen ? 'button' : undefined}
-            tabIndex={onOpen ? 0 : undefined}
-            aria-label={onOpen ? `${n.text}. Open ${ZONE_NAME[n.zone]}` : undefined}
-            aria-hidden={onOpen ? undefined : true}
-            onClick={onOpen ? () => onOpen(n.zone) : undefined}
-            onKeyDown={
-              onOpen
-                ? (e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      onOpen(n.zone);
-                    }
-                  }
-                : undefined
-            }
-          >
-            <rect
-              x={x - w / 2}
-              y={y - 11}
-              width={w}
-              height="21"
-              rx="10.5"
-              fill={n.tone === 'warn' ? 'var(--mustard)' : n.tone === 'good' ? '#e3efe2' : n.tone === 'bad' ? '#f8e3df' : 'var(--paper)'}
-              stroke={n.tone === 'good' ? 'var(--good)' : n.tone === 'bad' ? 'var(--bad)' : 'var(--burgundy)'}
-              strokeWidth="1.5"
-            />
-            <text x={x} y={y + 4} textAnchor="middle" fontSize="11.5" fontWeight="800" fill="var(--burgundy-dark)">
-              {n.text}
-            </text>
-          </g>
-        );
-      })}
-    </g>
-  );
-}
-
-function ZoneBadge({ x, y, n, lim }: { x: number; y: number; n: number; lim: number }) {
-  return (
-    <g className="zone-badge" aria-hidden="true">
-      <rect x={x} y={y} width="48" height="18" rx="9" fill={n === 0 ? 'var(--paper)' : 'var(--burgundy)'} stroke="var(--burgundy)" />
-      <text x={x + 24} y={y + 13} textAnchor="middle" fontSize="10.5" fill={n === 0 ? 'var(--burgundy)' : 'var(--paper)'} fontWeight="700">
-        {n}/{lim} staff
-      </text>
-    </g>
-  );
-}
-
-/** Floor jobs as "!" markers on the spot, and the cue at the door when a burst is coming. */
+/** Floor jobs as bubbles on the spot, and the burst announced at the door. */
 function FloorLayer({
   L,
   floor,
@@ -713,24 +495,16 @@ function FloorLayer({
   return (
     <g>
       {floor.door && (
-        <g className={`door-cue ${floor.door.arriving ? 'arriving' : ''} ${motion ? 'pulse' : ''}`} transform={`translate(${L.doorCue[0]} ${L.doorCue[1]})`} role="status" aria-label={`${floor.door.text}. ${floor.door.detail}`}>
-          <rect width="250" height="34" rx="10" fill={floor.door.arriving ? 'var(--burgundy)' : 'var(--mustard)'} stroke="var(--burgundy-dark)" strokeWidth="1.5" />
-          <text x="12" y="15" fontSize="12" fontWeight="800" fill={floor.door.arriving ? 'var(--paper)' : 'var(--ink)'}>
-            {floor.door.text}
-          </text>
-          <text x="12" y="28" fontSize="10.5" fill={floor.door.arriving ? 'var(--paper)' : 'var(--ink)'}>
-            {floor.door.detail}
-          </text>
+        <g className="door-cue" role="status" aria-label={floor.door.text}>
+          <SpeechBubble x={L.doorCue[0] + 110} y={L.doorCue[1] + 52} text={floor.door.text} tone="warn" pop={motion} icon="bus" />
         </g>
       )}
       {floor.tasks.map((t) => {
         const [x, y] = taskXY(t, L);
-        const k = CONFIG.floor.tasks.kinds[t.kind];
         const open = t.assigned === null;
         const act = () => interactive && onTask?.(t.id, selected);
         const done = Math.min(1, t.progress / t.work);
-        const label = floor.labels[t.id] ?? k.short;
-        const pillW = Math.max(60, label.length * 5.6 + 14);
+        const label = floor.labels[t.id] ?? '!';
         return (
           <g
             key={t.id}
@@ -738,7 +512,7 @@ function FloorLayer({
             transform={`translate(${x} ${y})`}
             role={interactive ? 'button' : undefined}
             tabIndex={interactive ? 0 : undefined}
-            aria-label={`${label}.${open ? ` Needs one person for about ${k.work} minute${k.work === 1 ? '' : 's'}.` : ''}${selected && open ? ' Send the selected person here.' : ''}`}
+            aria-label={`${label}${selected && open ? ' Send the selected person here.' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               act();
@@ -751,29 +525,20 @@ function FloorLayer({
             }}
           >
             <title>{label}</title>
-            <circle r="26" fill="transparent" />
-            {/* While someone is being moved, open jobs are highlighted as places they can go, like the zones. */}
-            {selected && open && interactive && <circle r="30" className="task-armed" />}
-            {target === t.id && <circle r="30" fill="rgba(227,178,60,0.35)" stroke="var(--mustard)" strokeWidth="4" />}
-            {t.kind === 'help' && (
-              <g transform="translate(-30 22) scale(0.9)" aria-hidden="true">
-                <Shopper n={Number(t.id.replace(/\D/g, '')) + 5} fill={0.2} />
+            <circle r="34" fill="transparent" />
+            {selected && open && interactive && <circle r="34" className="task-armed" />}
+            {target === t.id && <circle r="34" fill="rgba(227,178,60,0.35)" stroke="var(--mustard)" strokeWidth="4" />}
+            <TaskPicture kind={t.kind} n={Number(t.id.replace(/\D/g, ''))} />
+            {open ? (
+              <g className={motion ? 'task-bob' : ''}>
+                <SpeechBubble x={0} y={-20} text={label} tone={TASK_TONE[t.kind]} pop={motion} />
+              </g>
+            ) : (
+              <g transform="translate(0 -30)">
+                <circle r="13" fill="var(--paper)" stroke="var(--good)" strokeWidth="2.5" />
+                <path d={arc(done)} fill="var(--good)" />
               </g>
             )}
-            <circle r="13" fill={open ? 'var(--bad)' : 'var(--paper)'} stroke={open ? '#7a1f1a' : 'var(--good)'} strokeWidth="2" className={open && motion ? 'task-bob' : ''} />
-            {open ? (
-              <text y="5" textAnchor="middle" fontSize="16" fontWeight="900" fill="#fff">
-                !
-              </text>
-            ) : (
-              <path d={arc(done)} fill="var(--good)" />
-            )}
-            <g transform={`translate(${t.kind === 'help' ? 8 : 0} ${t.kind === 'help' ? -36 : 20})`}>
-              <rect x={-pillW / 2} y="0" width={pillW} height="17" rx="8" fill={open ? 'var(--paper)' : '#e9f2e7'} stroke={open ? 'var(--bad)' : 'var(--good)'} strokeWidth="1.5" />
-              <text y="12" textAnchor="middle" fontSize="10" fontWeight="800" fill="var(--ink)">
-                {label}
-              </text>
-            </g>
           </g>
         );
       })}
@@ -781,7 +546,52 @@ function FloorLayer({
   );
 }
 
-/** A pie slice for a job's progress (0..1), inside the marker. */
+/** What the job looks like on the floor. */
+function TaskPicture({ kind, n }: { kind: FloorTask['kind']; n: number }) {
+  switch (kind) {
+    case 'spill':
+      return (
+        <g aria-hidden="true">
+          <ellipse cx="0" cy="10" rx="28" ry="9" fill="#f6fbff" stroke="#9cc7d6" strokeWidth="2.5" />
+          <ellipse cx="24" cy="5" rx="7" ry="3" fill="#f6fbff" stroke="#9cc7d6" strokeWidth="2" />
+          <rect x="-26" y="-2" width="10" height="15" rx="2" transform="rotate(-70 -21 5)" fill="#fbfbf8" stroke="#3b6fb0" strokeWidth="1.6" />
+        </g>
+      );
+    case 'help':
+      return (
+        <g transform="translate(-26 22) scale(0.9)" aria-hidden="true">
+          <Shopper n={n + 5} fill={0.2} />
+        </g>
+      );
+    case 'pallet':
+      return (
+        <g aria-hidden="true">
+          <rect x="-22" y="-8" width="20" height="18" rx="2" fill="#c99a63" stroke="rgba(60,28,12,0.5)" />
+          <rect x="0" y="-8" width="20" height="18" rx="2" fill="#c99a63" stroke="rgba(60,28,12,0.5)" />
+          <rect x="-11" y="-24" width="20" height="17" rx="2" fill="#b98a53" stroke="rgba(60,28,12,0.5)" />
+        </g>
+      );
+    case 'baskets':
+      return (
+        <g aria-hidden="true">
+          <rect x="-14" y="2" width="28" height="10" rx="2" fill="none" stroke="#7a1f2b" strokeWidth="2" strokeDasharray="4 3" />
+        </g>
+      );
+    case 'priceCheck':
+      return (
+        <g aria-hidden="true">
+          <rect x="-10" y="-6" width="20" height="16" rx="2" fill="#f2d16b" stroke="rgba(60,28,12,0.5)" />
+          <text x="0" y="6" textAnchor="middle" fontSize="11" fontWeight="900" fill="#7a1f2b">
+            ?
+          </text>
+        </g>
+      );
+    default:
+      return null;
+  }
+}
+
+/** A pie slice for a job's progress (0..1). */
 function arc(f: number): string {
   if (f <= 0) return '';
   if (f >= 0.999) return 'M0 -10 A10 10 0 1 1 -0.01 -10 Z';
@@ -811,42 +621,43 @@ function CoinPops({ L, pops }: { L: Layout; pops: CoinPop[] }) {
   );
 }
 
+/** Rested people bounce; tired ones yawn. */
+export function staffMood(s: StaffMember, a: AssignmentId): 'bouncy' | 'sleepy' | 'resting' | 'ok' {
+  if (a === 'break') return 'resting';
+  if (productivity(s.energy) < 1) return 'sleepy';
+  return s.energy >= 75 ? 'bouncy' : 'ok';
+}
+
 function StaffToken({
   entrance,
   s,
   a,
   x,
   y,
-  act,
   selected,
   interactive,
   onClick,
   onPointerDown,
   walk,
   dragging,
-  lesson,
-  named,
+  motion,
 }: {
   entrance: [number, number];
   onPointerDown?: (e: ReactPointerEvent) => void;
   walk?: boolean;
   dragging?: boolean;
-  lesson?: boolean;
-  named?: boolean;
   s: StaffMember;
   a: AssignmentId;
   x: number;
   y: number;
-  act: Activity;
   selected: boolean;
   interactive: boolean;
   onClick: () => void;
+  motion: boolean;
 }) {
-  const e = Math.max(0, Math.min(100, s.energy));
-  const tired = productivity(s.energy) < 1;
-  const pose = act === 'plan' ? (a === 'break' ? 'sit' : a === 'tills' ? 'scan' : 'stand') : poseFor(a, act === 'work');
+  const mood = staffMood(s, a);
+  const pose = poseFor(a, true);
   const name = s.isTemp ? 'Temp' : s.name;
-  const barColour = e < CONFIG.staff.exhaustedBelow ? 'var(--bad)' : e < CONFIG.staff.tiredBelow ? 'var(--mustard)' : 'var(--good)';
   return (
     <g
       className={`token ${selected ? 'token-selected' : ''} ${interactive ? 'token-interactive' : ''} ${walk ? 'token-walk' : ''} ${dragging ? 'token-dragging' : ''}`}
@@ -855,7 +666,7 @@ function StaffToken({
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
       aria-pressed={interactive ? selected : undefined}
-      aria-label={interactive ? `${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ', tired' : ''}. Select.` : undefined}
+      aria-label={interactive ? `${s.name}: ${ASSIGNMENT_LABEL[a]}${mood === 'sleepy' ? ', sleepy' : ''}. Select.` : undefined}
       onClick={
         interactive && !onPointerDown
           ? (ev) => {
@@ -875,51 +686,42 @@ function StaffToken({
           : undefined
       }
     >
-      <circle cx="0" cy="-30" r="30" fill="transparent" />
-      <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}, energy ${Math.round(e)}${tired ? ' (tired, working slower)' : ''}${act === 'idle' ? ', nothing to do' : ''}`}</title>
-      {lesson && !selected && <circle cx="0" cy="-30" r="38" className="lesson-ring" />}
-      {selected && <ellipse cx="0" cy="0" rx="22" ry="7" fill="none" stroke="var(--mustard)" strokeWidth="4" />}
+      <circle cx="0" cy="-30" r="32" fill="transparent" />
+      <title>{`${s.name}: ${ASSIGNMENT_LABEL[a]}`}</title>
+      {selected && <ellipse cx="0" cy="0" rx="24" ry="8" fill="none" stroke="var(--mustard)" strokeWidth="4" />}
       <g
-        className={`${act === 'work' ? 'busy' : ''} ${s.availableFromStep !== undefined && s.availableFromStep < 1e9 ? 'staff-arrive' : ''}`}
+        className={`${s.availableFromStep !== undefined && s.availableFromStep < 1e9 ? 'staff-arrive' : ''}`}
         style={s.availableFromStep !== undefined ? { ['--sx' as string]: `${entrance[0] - x}px`, ['--sy' as string]: `${entrance[1] - y}px` } : undefined}
       >
-        <g transform={a === 'tills' ? 'scale(1.05)' : 'scale(1.15)'}>
-          <StaffFigure id={s.id} look={s.look} pose={pose} tired={tired} />
+        <g className={motion && mood === 'bouncy' ? 'bouncy' : motion && mood === 'sleepy' ? 'sleepy' : ''}>
+          <g transform={a === 'tills' ? 'scale(1.05)' : 'scale(1.15)'}>
+            <StaffFigure id={s.id} look={s.look} pose={pose} tired={mood === 'sleepy'} />
+          </g>
         </g>
       </g>
-      {act === 'idle' && a !== 'break' && <Bubble text="…" />}
-      {tired && act !== 'idle' && a !== 'break' && <Bubble text="z" tone="tired" />}
-      {named && (
+      {mood === 'sleepy' && (
+        <g className="yawn" transform={`translate(${x > 900 ? -34 : 30} -66)`} aria-hidden="true">
+          <rect x="-26" y="-14" width="52" height="22" rx="10" />
+          <text y="2" textAnchor="middle">
+            Yawn…
+          </text>
+          <text className="zz" x="30" y="-8">
+            z
+          </text>
+        </g>
+      )}
+      {selected && (
         <g transform="translate(0 4)">
-          <rect x="-30" y="0" width="60" height="20" rx="6" fill={selected ? 'var(--mustard)' : 'var(--paper)'} stroke={selected ? 'var(--burgundy-dark)' : 'var(--line-strong)'} strokeWidth={selected ? 1.5 : 1} />
-          <text y="11" textAnchor="middle" fontSize="11" fill="var(--ink)" fontWeight="800">
+          <rect x="-32" y="0" width="64" height="20" rx="8" fill="var(--mustard)" stroke="var(--burgundy-dark)" strokeWidth="1.5" />
+          <text y="14" textAnchor="middle" fontSize="12" fill="var(--ink)" fontWeight="800">
             {name}
           </text>
-          {selected && (
-            <>
-              <rect x="-24" y="14.5" width="48" height="3" rx="1.5" fill="var(--paper)" />
-              <rect x="-24" y="14.5" width={(48 * e) / 100} height="3" rx="1.5" fill={barColour} />
-            </>
-          )}
         </g>
       )}
     </g>
   );
 }
 
-function Bubble({ text, tone }: { text: string; tone?: 'tired' }) {
-  return (
-    <g className="bubble" transform="translate(16 -68)">
-      <rect x="-2" y="-9" width="16" height="13" rx="6" fill="var(--paper)" stroke={tone ? 'var(--mustard)' : 'var(--muted)'} />
-      <text x="6" y="1" textAnchor="middle" fontSize="10" fontWeight="800" fill={tone ? '#7d5c0c' : 'var(--muted)'}>
-        {text}
-      </text>
-    </g>
-  );
-}
-
-export function storeViewFromState(
-  args: Omit<StoreView, 'arrivals' | 'abandoned' | 'dropped' | 'emptyDepts' | 'tick' | 'notices'> & { dropped?: number; notices?: ShopNotice[] },
-): StoreView {
-  return { dropped: 0, notices: [], ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
+export function storeViewFromState(args: Omit<StoreView, 'arrivals' | 'abandoned' | 'dropped' | 'emptyDepts' | 'tick'> & { dropped?: number }): StoreView {
+  return { dropped: 0, ...args, arrivals: 0, abandoned: 0, emptyDepts: DEPTS.filter((d) => args.shelf[d] < 1), tick: 'rest' };
 }
