@@ -456,11 +456,15 @@ export const CONFIG = {
     weeklyGrowth: 0.05,
     maxGrowth: 0.3,
     /**
-     * The wholesaler's account. When cash and overdraft can't cover the
-     * morning order, up to `limit` of stock comes on account; `repayShare` of
-     * takings goes to paying it off until it is cleared.
+     * The till float: cash the morning order and upgrades can't spend, so there is always money in the till for the day.
+     * Rush deliveries and cash-and-carry during the day can use it.
      */
-    supplierCredit: { limit: 300, repayShare: 0.3 },
+    tillFloat: 150,
+    /**
+     * Stock bought on the wholesaler's account (no longer offered). Saves from before it was removed may still owe some:
+     * `repayShare` of takings pays it off.
+     */
+    supplierCredit: { repayShare: 0.3 },
     /** The three regulars at the start; the others can be hired, in any order. */
     startStaff: ['priya', 'kwame', 'mags'],
     hireable: ['bev', 'tomasz', 'dougie'],
@@ -489,8 +493,6 @@ export const CONFIG = {
     /** Overnight rest restores energy, but part of the day's strain carries over and lowers the next morning's energy. */
     fatigue: { carry: 0.4, energyPerStrain: 0.8, maxEnergyLoss: 25 },
     overnight: { produceShrink: 0.03 },
-    /** The bank lets the morning order take cash this far below zero (counted as debt). */
-    overdraftLimit: 500,
     /**
      * Recommended orders buy the forecast times this: room for the day's bursts of shoppers (about 15% more) and the hidden
      * variation, more for cupboard stock, which keeps. Space and cash still cap it.

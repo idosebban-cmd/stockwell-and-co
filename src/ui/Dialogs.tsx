@@ -54,8 +54,8 @@ export function Help({ onClose }: { onClose: () => void }) {
         </p>
         <h3>Each morning</h3>
         <p>
-          Check the forecast and confirm the recommended stock order (or adjust it). Nothing is bought until you open the shop. Short of cash? The wholesaler puts up to{' '}
-          {money(K.supplierCredit.limit)} of stock on account and takes part of the takings until it is paid off.
+          Check the forecast and confirm the recommended stock order (or adjust it). Nothing is bought until you open the shop. {money(K.tillFloat)} always stays in the till for the
+          day: the morning order and upgrades can’t spend it, but a rush delivery or a cash-and-carry run can.
         </p>
         <h3>During the day</h3>
         <ol>

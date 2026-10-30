@@ -294,8 +294,8 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
     scenario,
     ctx: dayContext(camp),
     cash: camp.cash,
-    overdraft: K.overdraftLimit,
-    credit: { owed: camp.credit, limit: K.supplierCredit.limit },
+    keep: K.tillFloat,
+    credit: { owed: camp.credit, limit: 0 },
     carried: carriedFor(camp),
     staff: campaignStaff(camp),
     setup,
@@ -307,14 +307,14 @@ export function startCampaignDay(camp: CampaignState, setup: SetupPlan): SimStat
 // Recommended order
 // ---------------------------------------------------------------------------
 
-/** What an order can draw on: cash plus the unused overdraft, then the wholesaler's account. */
-export function orderFunds(camp: CampaignState): number {
-  return Math.max(0, camp.cash + K.overdraftLimit) + creditRoom(camp);
+/** What the morning order and upgrades can spend: cash less the till float. */
+export function spendable(camp: CampaignState): number {
+  return Math.max(0, camp.cash - K.tillFloat);
 }
 
-/** How much more stock the wholesaler will put on account. */
-export function creditRoom(camp: CampaignState): number {
-  return Math.max(0, K.supplierCredit.limit - camp.credit);
+/** What an order can draw on. */
+export function orderFunds(camp: CampaignState): number {
+  return spendable(camp);
 }
 
 /** Estimated wages and day costs, for keeping cash back. */
@@ -492,9 +492,10 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
   const signals = daySignals(lastDay);
   const add = (id: UpgradeId, o: Omit<Offer, 'id' | 'available' | 'reason' | 'cashAfter'>, unavailable: string | null) => {
     const owned = owns(camp, id);
-    const reason = owned ? 'Already installed.' : unavailable ?? (camp.cash < o.cost ? `Needs ${money(o.cost)}; you have ${money(Math.max(0, camp.cash))}.` : null);
+    const reason = owned ? 'Already installed.' : unavailable ?? (spendable(camp) < o.cost ? needs(o.cost) : null);
     out.push({ id, ...o, available: reason === null, reason, cashAfter: camp.cash - o.cost });
   };
+  const needs = (cost: number) => `Needs ${money(cost)}; you can spend ${money(spendable(camp))} (${money(K.tillFloat)} stays in the till).`;
   const tooEarly = (from: number) => (camp.day < from + 1 ? `Available from ${weekdayName(from + 1)}.` : null);
   const ended: string | null = null;
 
@@ -509,8 +510,8 @@ export function allOffers(camp: CampaignState, lastDay: SimState | null = null):
       recurring: `${money(p.wage)} an hour on shift`,
       effect: `One more pair of hands every day. ${SPECIALITY_TEXT[p.speciality]}.`,
       brief: `Another pair of hands. ${SPECIALITY_TEXT[p.speciality].split(' (')[0]}.`,
-      available: !ended && !full && camp.cash >= cost,
-      reason: ended ?? (full ? `The break room takes a team of ${teamLimit(camp)}.` : camp.cash < cost ? `Needs ${money(cost)}.` : null),
+      available: !ended && !full && spendable(camp) >= cost,
+      reason: ended ?? (full ? `The break room takes a team of ${teamLimit(camp)}.` : spendable(camp) < cost ? needs(cost) : null),
       cashAfter: camp.cash - cost,
       why: signals.stretched ? signals.stretched : '',
       score: (signals.stretchedScore ?? 0) + 1,

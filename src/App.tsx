@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CONFIG } from './sim/config';
 import { describeAction, recommendedSetup, teamSize, weekdayName } from './sim/engine';
-import { campaignPool, liveValue, teamWellbeing, type CampaignState, type UpgradeId } from './sim/campaign';
+import { campaignPool, teamWellbeing, type CampaignState, type UpgradeId } from './sim/campaign';
 import { getStorage, loadMode, saveMode, type Mode } from './sim/save';
 import { CORE_LESSONS, LESSONS } from './sim/tutorial';
 import { QUICK_TARGETS } from './sim/summary';
@@ -15,7 +15,7 @@ import { Setup } from './ui/Setup';
 import { Opening } from './ui/Opening';
 import { Closing } from './ui/Closing';
 import { ClockControls } from './ui/ClockControls';
-import { dayKicker, Investments, MorningScreen, ValueLines } from './ui/CampaignScreens';
+import { dayKicker, Investments, MorningScreen, ValueLines, ValueSummary } from './ui/CampaignScreens';
 import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
 import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
@@ -209,6 +209,7 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
           targets={{ profit: 0, satisfaction: CONFIG.targets.satisfaction, wellbeing: CONFIG.targets.wellbeing }}
           primary={{ label: `Open tomorrow: ${weekdayName(camp.day + 1)} ▶`, onClick: week.continueDay }}
           extra={<Investments camp={after} closed={state} bought={week.pending} onBuy={(id: UpgradeId) => week.purchase(id)} onUndo={week.undoPurchase} />}
+          value={<ValueSummary camp={after} />}
           accountsExtra={<ValueLines camp={after} />}
         />
       </>
@@ -218,7 +219,6 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
     day: weekdayName(camp.day),
     reputation: camp.reputation,
     teamWellbeing: teamWellbeing(camp.staff),
-    value: liveValue(camp, state),
   };
   return (
     <>

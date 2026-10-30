@@ -11,7 +11,7 @@ interface Props {
   saveOk: boolean;
   /** During the guided shift the bar shows the lesson instead of the day's score. */
   tutorial?: { label: string; progress: number; onExit: () => void };
-  /** In your shop: the day, the shop's reputation, the team and business value (no targets). */
+  /** In your shop: the day, cash, the shop's reputation and the team (no targets; business value is in the end-of-day summary). */
   campaign?: CampaignStatus;
   /** The mute button. */
   sound?: { on: boolean; toggle: () => void };
@@ -21,7 +21,6 @@ export interface CampaignStatus {
   day: string;
   reputation: number;
   teamWellbeing: number;
-  value: number;
 }
 
 export function Brand({ small }: { small?: boolean }) {
@@ -47,7 +46,7 @@ const EXPLAIN: Record<StatKey, string> = {
   profit: 'Takings minus the cost of goods sold, waste, wages and other costs so far. Unsold stock is not a cost.',
   satisfaction: 'How customers feel on average today: whether they found what they wanted, how long they queued, and prices.',
   wellbeing: 'How the team is holding up across the whole shift. Long stretches without a break leave a mark.',
-  value: 'Cash, plus stock at what it cost, plus equipment at what you paid, minus any overdraft and anything owed to the wholesaler.',
+  value: 'Cash, plus stock at what it cost, plus equipment at what you paid, minus anything owed.',
 };
 
 const CAMPAIGN_EXPLAIN: Partial<Record<StatKey, string>> = {
@@ -153,19 +152,7 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
             <span className="stat-label">Cash</span>
             <span className="stat-value">{money(state.cash)}</span>
           </div>
-          {campaign ? (
-            <Indicator
-              k="profit"
-              label="Today"
-              value={money(operatingProfit(state))}
-              target=""
-              ok={null}
-              status={closed ? 'The day is done.' : `Closes at ${hourLabel(state.ctx.hours)}`}
-              explain={CAMPAIGN_EXPLAIN.profit}
-              open={open === 'profit'}
-              onToggle={() => toggle('profit')}
-            />
-          ) : (
+          {campaign ? null : (
             <Indicator
               k="profit"
               label="Profit"
@@ -207,16 +194,6 @@ export function StatusBar({ state, onHelp, onSettings, onMenu, saveOk, tutorial,
                 explain={CAMPAIGN_EXPLAIN.wellbeing}
                 open={open === 'wellbeing'}
                 onToggle={() => toggle('wellbeing')}
-              />
-              <Indicator
-                k="value"
-                label="Business"
-                value={pounds(campaign.value)}
-                target=""
-                ok={null}
-                status={'Business value now'}
-                open={open === 'value'}
-                onToggle={() => toggle('value')}
               />
             </>
           ) : (

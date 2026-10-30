@@ -220,9 +220,9 @@ export interface ShiftInput {
   ctx: DayContext;
   /** Cash before the day's order is paid for. */
   cash: number;
-  /** How far an order may take cash below zero (campaign overdraft). */
-  overdraft?: number;
-  /** The wholesaler's account: what is owed and how much it may reach. Stock beyond cash and overdraft goes on it. */
+  /** Cash the order may not spend (the campaign's till float). */
+  keep?: number;
+  /** The wholesaler's account: what is owed and how much it may reach. Stock beyond the spendable cash goes on it. */
   credit?: { owed: number; limit: number };
   /** Stock already in the shop, by where it sits. */
   carried: Record<DeptId, { where: 'shelf' | 'backroom' | 'dock'; batch: Batch }[]>;
@@ -235,7 +235,7 @@ export interface ShiftInput {
 export function startShift(input: ShiftInput): SimState {
   const { seed, scenario, ctx, setup } = input;
   const carriedQtys = perDept((d) => input.carried[d].reduce((t, c) => t + c.batch.qty, 0));
-  const funds = Math.max(0, input.cash + (input.overdraft ?? 0));
+  const funds = Math.max(0, input.cash - (input.keep ?? 0));
   const creditRoom = input.credit ? Math.max(0, input.credit.limit - input.credit.owed) : 0;
   const check = checkSetup(setup, scenario.forecast, { cash: funds + creditRoom, carried: carriedQtys, ctx });
   if (check.errors.length) throw new Error(check.errors.join(' '));

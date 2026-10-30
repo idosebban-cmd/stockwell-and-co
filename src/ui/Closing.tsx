@@ -25,6 +25,8 @@ interface Props {
   others?: Action[];
   /** Campaign: cash and improvement offers under the takeaway. */
   extra?: ReactNode;
+  /** Campaign: business value at closing, shown under the takeaway. */
+  value?: ReactNode;
   /** Campaign: business value lines for the Accounts tab. */
   accountsExtra?: ReactNode;
   /** Figures only, with no targets, ticks or crosses (your shop has no pass or fail). */
@@ -36,7 +38,7 @@ interface Props {
 type Tab = 'accounts' | 'operations' | 'team';
 
 /** Closing time: a compact result first, the full report on request. */
-export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra, plain, wages }: Props) {
+export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, value, accountsExtra, plain, wages }: Props) {
   const s = summarise(state, targets);
   const [report, setReport] = useState(false);
   const [tab, setTab] = useState<Tab>('accounts');
@@ -68,6 +70,7 @@ export function Closing({ state, targets, title, kicker, cash, primary, others =
         {!report && (
           <>
             {s.takeaway && <p className="takeaway">{s.takeaway}</p>}
+            {value}
             {extra}
           </>
         )}

@@ -10,11 +10,11 @@ import {
   allOffers,
   businessValue,
   carriedQty,
-  creditRoom,
   dayConfig,
   dayContext,
   dayScenario,
   orderFunds,
+  spendable,
   recommendOrder,
   startCampaignDay,
   topOffers,
@@ -90,9 +90,7 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
   }, [camp, order, check.errors.length]);
   const plan = useMemo(() => defaultPlan(preview), [preview]);
   const cfg = dayConfig(camp.day);
-  // Beyond cash and the overdraft, stock goes on the wholesaler's account.
-  const onAccount = Math.min(creditRoom(camp), Math.max(0, check.cost - Math.max(0, camp.cash + K.overdraftLimit)));
-  const after = camp.cash - check.cost + onAccount;
+  const after = camp.cash - check.cost;
   const set = (d: DeptId, k: 'morning' | 'midday', v: number) => setOrder((o) => ({ ...o, orders: { ...o.orders, [d]: { ...o.orders[d], [k]: Math.max(0, Math.round(v)) } } }));
   const setLife = (k: 'morning' | 'midday', l: ChilledLife) => setOrder((o) => ({ ...o, chilledLife: { ...o.chilledLife, [k]: l } }));
   const cues = cuesFor(camp, ctx);
@@ -125,7 +123,7 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
         label: 'Confirm order & open ▶',
         onClick: () => onOpen(order),
         disabled: check.errors.length > 0,
-        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading${onAccount > 0 ? ` (${money(onAccount)} on account)` : after < 0 ? ` (uses ${money(-after)} of the overdraft)` : ''}`,
+        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading`,
         noteTone: check.errors.length ? 'bad' : undefined,
       }}
       panel={() => (
@@ -228,13 +226,8 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
             </button>
           </div>
           {orderInfo && <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the shelf and stockroom space, and your cash.</p>}
-          {(onAccount > 0 || camp.credit > 0.5) && (
-            <p className="credit-note">
-              {onAccount > 0
-                ? `Short of cash: the wholesaler puts up to ${pounds(K.supplierCredit.limit)} of stock on account, repaid from takings.`
-                : `Owed to the wholesaler: ${money(camp.credit)}, repaid from takings.`}
-            </p>
-          )}
+          <p className="float-note">{pounds(K.tillFloat)} kept in the till for the day.</p>
+          {camp.credit > 0.5 && <p className="credit-note">Owed to the wholesaler: {money(camp.credit)}, repaid from takings.</p>}
         </div>
       )}
     />
@@ -319,9 +312,9 @@ function equipInfo(id: EquipId): EquipInfo {
   }
 }
 
-function shortReason(o: Offer): string {
+function shortReason(o: Offer, camp: CampaignState): string {
   if (!o.reason) return '';
-  if (o.reason.startsWith('Needs £')) return `Short of ${money(o.cost - Math.max(0, o.cashAfter + o.cost))}`;
+  if (o.reason.startsWith('Needs £')) return `Short of ${money(o.cost - spendable(camp))}`;
   if (o.reason.startsWith('Available from')) return `From ${o.reason.replace('Available from ', '').replace('.', '').slice(0, 3)}`;
   if (o.reason.startsWith('Needs the chilled')) return 'Needs chilled';
   if (o.reason.startsWith('Already')) return 'Installed';
@@ -347,6 +340,7 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
     <section className="invest" aria-labelledby="invest-h">
       <div className="invest-head">
         <h2 id="invest-h">Improve the shop</h2>
+        <p className="float-note">{pounds(K.tillFloat)} kept in the till for the day.</p>
         {bought.length > 0 && (
           <ul className="bought">
             {bought.map((id) => (
@@ -377,7 +371,7 @@ export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: Cam
                     <strong>{o.name}</strong>
                     <span className="choice-benefit">{equipInfo(id).benefit}</span>
                     <span className="choice-cost">{pounds(o.cost)}</span>
-                    {!o.available && <span className="choice-off">{shortReason(o)}</span>}
+                    {!o.available && <span className="choice-off">{shortReason(o, camp)}</span>}
                     {o.available && suggested.has(o.id) && <span className="choice-tag">Suggested</span>}
                   </button>
                 </li>
@@ -485,6 +479,41 @@ function EquipDetail({ o, onBuy }: { o: Offer; onBuy: () => void }) {
   );
 }
 
+/** Business value at closing: the total, how it changed today, and what it is made of. */
+export function ValueSummary({ camp }: { camp: CampaignState }) {
+  const v = businessValue(camp);
+  const before = camp.results.length >= 2 ? camp.results[camp.results.length - 2].valueEnd : camp.startValue;
+  const change = v.total - before;
+  const parts: [string, number][] = [
+    ['Cash', v.cash],
+    ['Stock', v.inventory],
+    ['Equipment', v.equipment],
+  ];
+  return (
+    <section className="value-sum" aria-label="Business value">
+      <p className="value-head">
+        <span>Business value</span> <strong>{pounds(v.total)}</strong>{' '}
+        <span className={`value-change ${change >= 0 ? 'up' : 'down'}`}>
+          {change >= 0 ? '▲ +' : '▼ −'}
+          {pounds(Math.abs(change))} today
+        </span>
+      </p>
+      <ul className="value-parts">
+        {parts.map(([k, x]) => (
+          <li key={k}>
+            {k} <strong>{pounds(x)}</strong>
+          </li>
+        ))}
+        {v.debt > 0.5 && (
+          <li className="bad">
+            Owed <strong>−{pounds(v.debt)}</strong>
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
 /** Business value lines for the Accounts tab of a campaign day. */
 export function ValueLines({ camp }: { camp: CampaignState }) {
   const v = businessValue(camp);
@@ -506,7 +535,7 @@ export function ValueLines({ camp }: { camp: CampaignState }) {
         </tr>
         {v.debt > 0 && (
           <tr>
-            <th scope="row">{camp.credit > 0.5 ? 'Overdraft and wholesaler’s account' : 'Overdraft'}</th>
+            <th scope="row">{camp.credit > 0.5 ? 'Owed (bank and wholesaler)' : 'Owed to the bank'}</th>
             <td>−{money(v.debt)}</td>
           </tr>
         )}

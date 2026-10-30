@@ -39,6 +39,14 @@ describe('ordering during the day', () => {
     // Plenty of cupboard stock: enough until closing, no warning.
     expect(stockOutlook(live.state, 'ambient').runsOutAt).toBeNull();
   });
+  it('rush deliveries and cash-and-carry can use the till float', () => {
+    const live = shortSunday();
+    live.state.cash = CONFIG.campaign.tillFloat - 20;
+    const q = quote(live.state, 'produce', 'emergency', 60);
+    expect(q.cost).toBeLessThan(live.state.cash);
+    expect(q.info.available).toBe(true);
+    expect(quote(live.state, 'produce', 'cashAndCarry', 40, 'kwame').info.available).toBe(true);
+  });
   it('a rush delivery is paid now, reaches the dock after its minutes and needs unloading', () => {
     let live = shortSunday();
     const cash = live.state.cash;

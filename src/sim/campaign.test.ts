@@ -6,7 +6,7 @@ import {
   buy,
   businessValue,
   carriedQty,
-  creditRoom,
+  spendable,
   dayContext,
   dayScenario,
   finishDay,
@@ -333,24 +333,39 @@ describe('day after day', () => {
   });
 });
 
-describe('supplier credit', () => {
-  it('with no cash and the overdraft used, a small order still comes on account and is repaid from takings', () => {
-    const broke: CampaignState = { ...newCampaign(1), cash: -K.overdraftLimit - 200 };
-    expect(orderFunds(broke)).toBe(K.supplierCredit.limit);
-    const order = recommendOrder(broke);
-    const cost = checkSetup(order, undefined, { cash: Infinity, carried: carriedQty(broke), ctx: dayContext(broke) }).cost;
-    expect(cost).toBeGreaterThan(0);
-    expect(cost).toBeLessThanOrEqual(K.supplierCredit.limit);
-    let state = startCampaignDay(broke, order);
-    expect(state.credit).toBeCloseTo(cost, 6);
-    expect(state.cash).toBeCloseTo(broke.cash, 6);
+describe('till float', () => {
+  it('the morning order never spends the float', () => {
+    for (const cash of [2000, 600, K.tillFloat + 40, K.tillFloat, 60, -200]) {
+      const c: CampaignState = { ...newCampaign(1), cash };
+      expect(orderFunds(c)).toBeCloseTo(Math.max(0, cash - K.tillFloat), 9);
+      const order = recommendOrder(c);
+      const state = startCampaignDay(c, order);
+      expect(state.credit ?? 0).toBe(0);
+      if (cash >= K.tillFloat) expect(state.cash).toBeGreaterThanOrEqual(K.tillFloat - 1e-6);
+      else expect(state.cash).toBeCloseTo(cash, 9);
+    }
+    // An order that would dip into the float is refused.
+    const c: CampaignState = { ...newCampaign(1), cash: K.tillFloat + 10 };
+    const big = recommendOrder({ ...c, cash: 5000 });
+    expect(() => startCampaignDay(c, big)).toThrow();
+  });
+  it('upgrades can’t spend the float', () => {
+    const base = newCampaign(1);
+    const cost = allOffers({ ...base, day: 1 }).find((o) => o.id === 'till3')!.cost;
+    const c: CampaignState = { ...base, day: 1, cash: cost + K.tillFloat - 1 };
+    const o = allOffers(c).find((x) => x.id === 'till3')!;
+    expect(o.available).toBe(false);
+    expect(o.reason).toMatch(/stays in the till/);
+    expect(spendable(c)).toBeLessThan(cost);
+    expect(allOffers({ ...c, cash: cost + K.tillFloat }).find((x) => x.id === 'till3')!.available).toBe(true);
+  });
+  it('a save that still owes the wholesaler pays it off from takings, and it counts against business value', () => {
+    const owing: CampaignState = { ...newCampaign(1), credit: 120 };
+    let state = startCampaignDay(owing, recommendOrder(owing));
+    expect(state.credit).toBeCloseTo(120, 9);
     while (state.hour < state.ctx.hours) state = runHour(state, sensible(state)).state;
-    expect(state.credit!).toBeLessThan(cost);
-    expect(state.credit!).toBeCloseTo(Math.max(0, cost - state.ledger.revenue * K.supplierCredit.repayShare), 6);
-    const after = finishDay(broke, state).camp;
-    expect(after.credit).toBeCloseTo(state.credit!, 9);
-    expect(creditRoom(after)).toBeCloseTo(K.supplierCredit.limit - after.credit, 9);
-    // What is owed counts against business value.
+    expect(state.credit!).toBeCloseTo(Math.max(0, 120 - state.ledger.revenue * K.supplierCredit.repayShare), 6);
+    const after = finishDay(owing, state).camp;
     expect(businessValue(after).debt).toBeCloseTo(Math.max(0, -after.cash) + after.credit, 9);
   });
 });
