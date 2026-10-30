@@ -5,6 +5,7 @@
  * the same start and progress never depends on a half-played interval.
  */
 import { CONFIG, DEPTS, deptName, type DeptId, type PriceTier } from './config';
+import { emptyFloor } from './floor';
 import { deptUnits, recommendedSetup, runSteps, startDay } from './engine';
 import { ASSIGNMENT_LABEL } from './roster';
 import { TUTORIAL_SEED } from './scenario';
@@ -72,6 +73,8 @@ function build(setup: Setup): SimState {
   s.step = 0;
   s.deliveries = [];
   s.announcements = [];
+  // Lessons stay quiet: no bursts, floor jobs or questions.
+  s.floor = emptyFloor();
   const defaults: Record<DeptId, { shelf: number; backroom: number; dock: number }> = {
     produce: { shelf: 280, backroom: 300, dock: 0 },
     chilled: { shelf: 240, backroom: 250, dock: 0 },

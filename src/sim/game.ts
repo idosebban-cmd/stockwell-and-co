@@ -36,5 +36,13 @@ export function retryRecord(record: GameRecord): GameRecord {
 
 /** A version 3 save (hourly plans) as a version 4 one. */
 export function convertRecordV3(old: { seed: number; setup: SetupPlan | null; plans: HourPlan[] }): GameRecord {
-  return { version: RECORD_VERSION, seed: old.seed, setup: old.setup, choices: choicesFromHourlyPlans(old.plans), minute: Math.min(old.plans.length, CONFIG.hours) * CONFIG.stepsPerHour };
+  const choices = choicesFromHourlyPlans(old.plans);
+  const minute = Math.min(old.plans.length, CONFIG.hours) * CONFIG.stepsPerHour;
+  // Questions from the floor didn't exist then: they get the first answer.
+  if (old.setup) {
+    const answers: Choice[] = [];
+    replayLive(startDay(old.seed, old.setup), choices, minute, answers);
+    choices.push(...answers);
+  }
+  return { version: RECORD_VERSION, seed: old.seed, setup: old.setup, choices, minute };
 }

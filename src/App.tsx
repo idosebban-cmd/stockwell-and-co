@@ -20,6 +20,10 @@ import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
 import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
 import { unlockAudio } from './ui/sound';
+import { EventDialog } from './ui/EventDialog';
+import type { StoreFloor } from './ui/Store';
+import { BURST_TEXT, burstAtDoor } from './sim/floor';
+import { stepOf } from './sim/live';
 import type { SimState } from './sim/types';
 import type { Game } from './ui/useGame';
 
@@ -225,7 +229,11 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
 /** A trading day (your shop or Quick play), live: the shop, the clock and the one panel. */
 function LiveScreen({ day, state, reduced }: { day: LiveDay; state: SimState; reduced: boolean }) {
   const plan = day.live!.plan;
+  const pending = state.floor?.pending ?? null;
   return (
+    <>
+    {pending && <EventDialog state={state} event={pending} onAnswer={day.answer} />}
+    {import.meta.env.DEV && day.pacingLine && <p className="pacing-debug">{day.pacingLine}</p>}
     <ShopScreen
       state={state}
       plan={plan}
@@ -244,8 +252,25 @@ function LiveScreen({ day, state, reduced }: { day: LiveDay; state: SimState; re
       clock={<ClockControls clock={day.clock} state={state} />}
       tools={(ctx) => <GameTools state={state} plan={plan} ctx={ctx} current={state.hour} planning />}
       panel={(ctx) => <GamePanel state={state} plan={plan} onChange={ctx.onPlanChange} sel={ctx.sel} setSel={ctx.setSel} />}
+      floor={storeFloor(state)}
+      onAssignTask={day.assignTask}
+      notice={day.toast}
     />
+    </>
   );
+}
+
+/** Floor jobs and the cue at the door, for the shop drawing. */
+function storeFloor(state: SimState): StoreFloor {
+  const door = burstAtDoor(state.floor, stepOf(state));
+  return {
+    tasks: state.floor?.tasks ?? [],
+    door: door
+      ? door.inMinutes > 0
+        ? { text: BURST_TEXT[door.burst.kind].cue, detail: `About ${door.burst.shoppers} shoppers in ${door.inMinutes} min: open another till?`, arriving: false }
+        : { text: BURST_TEXT[door.burst.kind].arriving, detail: `About ${door.burst.shoppers} shoppers coming in`, arriving: true }
+      : null,
+  };
 }
 
 // ---------------------------------------------------------------------------

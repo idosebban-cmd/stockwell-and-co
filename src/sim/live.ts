@@ -3,32 +3,41 @@
  *
  * The player's jobs and prices stand until they change them; actions happen
  * the moment they are chosen (also while paused). A break ends by itself
- * after `live.breakMinutes` and the person goes back to their job. Choices
- * are stamped with the minute they were made, so a day is stored as its
- * opening state plus its choices and rebuilt exactly by `replayLive`.
+ * after `live.breakMinutes` and the person goes back to their job; so does
+ * someone sent to a floor job once it is done. Questions from the floor
+ * (`floor.events`) are raised when their minute comes and the day doesn't
+ * move on until they are answered. Choices are stamped with the minute they
+ * were made, so a day is stored as its opening state plus its choices and
+ * rebuilt exactly by `replayLive`.
  *
  * Pure: no timers. The UI's clock calls `advance` once per in-game minute.
  */
-import { CONFIG, DEPTS, type DeptId, type PriceTier } from './config';
-import { assignmentLimit, defaultPlan, onShift, runSteps, takeAction } from './engine';
-import type { ActionRequest, AssignmentId, HourPlan, HourReport, SimState } from './types';
+import { CONFIG, DEPTS, deptName, type DeptId, type PriceTier } from './config';
+import { assignmentLimit, defaultPlan, money, onShift, runSteps, takeAction, useByExpiry, weekdayName } from './engine';
+import * as S from './stock';
+import type { ActionRequest, AssignmentId, FloorEvent, HourPlan, HourReport, SimState } from './types';
 
 const C = CONFIG;
 const STEPS = C.stepsPerHour;
 const BREAK_STEPS = Math.round((C.live.breakMinutes / 60) * STEPS);
+const E = C.floor.events;
 
 export type Choice =
   | { at: number; kind: 'jobs'; assignments: Record<string, AssignmentId> }
   | { at: number; kind: 'prices'; pricing: Record<DeptId, PriceTier> }
-  | { at: number; kind: 'action'; action: ActionRequest };
+  | { at: number; kind: 'action'; action: ActionRequest }
+  /** Send someone to a floor job. */
+  | { at: number; kind: 'task'; staffId: string; taskId: string }
+  /** Answer the question waiting on the floor. */
+  | { at: number; kind: 'answer'; eventId: string; option: number };
 
 export interface Live {
   state: SimState;
   /** Standing jobs and prices. `actions` is always empty: actions are taken at once. */
   plan: HourPlan;
-  /** Step each person on a break started it. */
-  breakSince: Record<string, number>;
-  /** The job each person on a break goes back to. */
+  /** Step each person's break ends. */
+  breakUntil: Record<string, number>;
+  /** The job each person on a break or a floor job goes back to. */
   returnTo: Record<string, AssignmentId>;
 }
 
@@ -49,63 +58,252 @@ function count(plan: HourPlan, a: AssignmentId, except?: string): number {
 }
 
 function freePlace(state: SimState, plan: HourPlan, want: AssignmentId, who: string): AssignmentId {
-  if (count(plan, want, who) < assignmentLimit(want, state)) return want;
+  if (want !== 'task' && count(plan, want, who) < assignmentLimit(want, state)) return want;
   return FALLBACK.find((a) => a !== 'break' && count(plan, a, who) < assignmentLimit(a, state)) ?? 'break';
 }
 
 export function startLive(state: SimState): Live {
   const plan = defaultPlan(state);
   plan.actions = [];
-  return settle({ state, plan, breakSince: {}, returnTo: {} });
+  return settle({ state, plan, breakUntil: {}, returnTo: {} });
 }
 
 /**
  * Keeps the standing plan valid at the current minute: people who have just
- * arrived get a job, and breaks that have run their time end.
+ * arrived get a job, breaks that have run their time end, and people whose
+ * floor job is done go back to what they were doing.
  */
 function settle(live: Live): Live {
   const { state } = live;
   const now = stepOf(state);
   let plan = live.plan;
-  let breakSince = live.breakSince;
+  let breakUntil = live.breakUntil;
   let returnTo = live.returnTo;
   const copy = () => {
     if (plan === live.plan) plan = { ...plan, assignments: { ...plan.assignments } };
-    if (breakSince === live.breakSince) breakSince = { ...breakSince };
+    if (breakUntil === live.breakUntil) breakUntil = { ...breakUntil };
     if (returnTo === live.returnTo) returnTo = { ...returnTo };
+  };
+  const goBack = (id: string) => {
+    copy();
+    plan.assignments[id] = freePlace(state, plan, returnTo[id] ?? 'tills', id);
+    delete breakUntil[id];
+    delete returnTo[id];
   };
   for (const s of onShift(state)) {
     const a = plan.assignments[s.id];
     if (!a) {
       copy();
-      plan.assignments[s.id] = freePlace(state, plan, s.isTemp ? 'tills' : s.lastAssignment === 'break' ? 'tills' : s.lastAssignment, s.id);
+      plan.assignments[s.id] = freePlace(state, plan, s.isTemp ? 'tills' : s.lastAssignment === 'break' || s.lastAssignment === 'task' ? 'tills' : s.lastAssignment, s.id);
     } else if (a === 'break') {
-      if (breakSince[s.id] === undefined) {
+      if (breakUntil[s.id] === undefined) {
         copy();
-        breakSince[s.id] = now;
-      } else if (now - breakSince[s.id] >= BREAK_STEPS) {
-        copy();
-        plan.assignments[s.id] = freePlace(state, plan, returnTo[s.id] ?? 'tills', s.id);
-        delete breakSince[s.id];
-        delete returnTo[s.id];
-      }
-    }
+        breakUntil[s.id] = now + BREAK_STEPS;
+      } else if (now >= breakUntil[s.id]) goBack(s.id);
+    } else if (a === 'task' && !state.floor?.tasks.some((t) => t.assigned === s.id)) goBack(s.id);
   }
-  return plan === live.plan && breakSince === live.breakSince ? live : { ...live, plan, breakSince, returnTo };
+  return plan === live.plan && breakUntil === live.breakUntil ? live : { ...live, plan, breakUntil, returnTo };
 }
 
-/** Runs up to `minutes` minutes (stopping at closing). Returns the reports of the intervals run. */
+/** Raises the next question if its minute has come. */
+function raiseDue(live: Live): Live {
+  const f = live.state.floor;
+  if (!f || f.pending || !f.events.length || f.events[0].at > stepOf(live.state) || isClosed(live)) return live;
+  const state = structuredClone(live.state);
+  const floor = state.floor!;
+  const ev = floor.events.shift()!;
+  const filled = fillEvent(state, live.plan, ev);
+  if (filled) floor.pending = filled;
+  return { ...live, state };
+}
+
+/** Works out who or what a question is about; null when it doesn't apply now. */
+function fillEvent(state: SimState, plan: HourPlan, ev: FloorEvent): FloorEvent | null {
+  switch (ev.kind) {
+    case 'breakRequest': {
+      const tired = onShift(state)
+        .filter((s) => !s.isTemp && plan.assignments[s.id] !== 'break')
+        .sort((a, b) => a.energy - b.energy)[0];
+      return tired ? { ...ev, staffId: tired.id } : null;
+    }
+    case 'nearDate': {
+      const d = (['produce', 'chilled'] as DeptId[]).find((x) => state.ctx.depts.includes(x));
+      return d ? { ...ev, dept: d } : null;
+    }
+    case 'complaint': {
+      const empty = DEPTS.find((d) => state.ctx.depts.includes(d) && S.total(state.stock[d].shelf) < state.ctx.shelfCap[d] * 0.1);
+      const reason = state.queue.customers > 5 ? 'how long the queue is' : empty ? `the empty ${deptName(empty).toLowerCase()} shelves` : 'a squashed loaf from yesterday';
+      return { ...ev, reason };
+    }
+    default:
+      return ev;
+  }
+}
+
+export interface EventCard {
+  title: string;
+  text: string;
+  options: { label: string; effect: string }[];
+}
+
+/** What a question says and what each answer will do. */
+export function describeEvent(state: SimState, ev: FloorEvent): EventCard {
+  const name = state.staff.find((s) => s.id === ev.staffId)?.name ?? 'Someone';
+  switch (ev.kind) {
+    case 'breakRequest':
+      return {
+        title: `${name} needs a breather`,
+        text: `${name} looks shattered and asks for ten minutes off the floor.`,
+        options: [
+          { label: 'Yes, go now', effect: `${name} rests for ${E.breakRequest.minutes} minutes, then goes back to work` },
+          { label: 'Not just now', effect: `${name} carries on, but it wears on them` },
+        ],
+      };
+    case 'favour':
+      return {
+        title: 'A favour for a regular',
+        text: 'Mrs Patel, who comes in every day, asks if you could keep a loaf and half a dozen eggs back for her tomorrow.',
+        options: [
+          { label: 'Of course', effect: `${money(E.favour.cost)}; shoppers feel looked after (+${E.favour.mood} for an hour)` },
+          { label: 'Sorry, we can’t', effect: `Word gets round (${E.favour.refusedMood} for an hour)` },
+        ],
+      };
+    case 'nearDate': {
+      const d = ev.dept ?? 'produce';
+      const cost = E.nearDate.qty * C.departments[d].unitCost * E.nearDate.costShare;
+      return {
+        title: 'The wholesaler is on the phone',
+        text: `They have ${E.nearDate.qty} ${deptName(d).toLowerCase()} items near their date at half price, dropped at the dock now. Use by tomorrow.`,
+        options: [
+          { label: `Take them (${money(cost)})`, effect: `${E.nearDate.qty} items on the dock to unload and sell by tomorrow` },
+          { label: 'No thanks', effect: 'Nothing changes' },
+        ],
+      };
+    }
+    case 'complaint':
+      return {
+        title: 'A customer complaint',
+        text: `A customer at the counter is unhappy about ${ev.reason ?? 'their visit'}.`,
+        options: [
+          { label: `Apologise and give a ${money(E.complaint.voucher)} voucher`, effect: `${money(E.complaint.voucher)}; customers +${E.complaint.voucherMood} for 45 minutes` },
+          { label: 'Apologise', effect: `Customers +${E.complaint.apologyMood} for 45 minutes` },
+          { label: '“It’s busy, sorry”', effect: `Customers ${E.complaint.brushOffMood} for 45 minutes` },
+        ],
+      };
+    case 'donation':
+      return {
+        title: 'The school fête',
+        text: 'The primary school round the corner asks for a raffle prize for Saturday’s fête.',
+        options: [
+          { label: `Donate a hamper (${money(E.donation.cost)})`, effect: `Goodwill: customers +${E.donation.mood} for three hours` },
+          { label: 'Not this time', effect: 'Nothing changes' },
+        ],
+      };
+  }
+}
+
+/** Applies an answer to the waiting question. Returns the new day and a line saying what happened. */
+function answer(live: Live, option: number): { live: Live; result: string } {
+  const ev = live.state.floor?.pending;
+  if (!ev) throw new Error('No question is waiting.');
+  const card = describeEvent(live.state, ev);
+  if (option < 0 || option >= card.options.length) throw new Error('No such answer.');
+  const state = structuredClone(live.state);
+  const floor = state.floor!;
+  const now = stepOf(state);
+  const mood = (delta: number, minutes: number, label: string) => floor.mood.push({ delta, until: now + minutes, label });
+  const spend = (amount: number) => {
+    state.ledger.extras.Goodwill = (state.ledger.extras.Goodwill ?? 0) + amount;
+    state.cash -= amount;
+  };
+  let next: Live = { ...live, state };
+  let result = '';
+  const staff = state.staff.find((s) => s.id === ev.staffId);
+  switch (ev.kind) {
+    case 'breakRequest':
+      if (staff && option === 0) {
+        staff.strain = Math.max(0, staff.strain - E.breakRequest.grantedStrainRelief);
+        const was = live.plan.assignments[staff.id];
+        const roomFull = count(live.plan, 'break', staff.id) >= assignmentLimit('break', live.state);
+        if (was !== 'break' && !roomFull) {
+          const plan = { ...live.plan, assignments: { ...live.plan.assignments, [staff.id]: 'break' as AssignmentId } };
+          const t = floor.tasks.find((x) => x.assigned === staff.id);
+          if (t) t.assigned = null;
+          next = {
+            ...next,
+            plan,
+            breakUntil: { ...live.breakUntil, [staff.id]: now + E.breakRequest.minutes },
+            returnTo: { ...live.returnTo, [staff.id]: was === 'task' ? (live.returnTo[staff.id] ?? 'tills') : (was ?? 'tills') },
+          };
+        }
+        result = `${staff.name} heads for the kettle and will be back in ${E.breakRequest.minutes} minutes.`;
+      } else if (staff) {
+        staff.strain += E.breakRequest.refusedStrain;
+        result = `${staff.name} carries on, a bit flat.`;
+      }
+      break;
+    case 'favour':
+      if (option === 0) {
+        spend(E.favour.cost);
+        mood(E.favour.mood, E.favour.moodMinutes, 'Kept a loaf for Mrs Patel');
+        result = 'Mrs Patel is delighted, and tells everyone in the queue.';
+      } else {
+        mood(E.favour.refusedMood, E.favour.moodMinutes, 'Said no to a regular');
+        result = 'Mrs Patel understands, but she mentions it to a few people.';
+      }
+      break;
+    case 'nearDate':
+      if (option === 0 && ev.dept) {
+        const unit = C.departments[ev.dept].unitCost * E.nearDate.costShare;
+        const cost = E.nearDate.qty * unit;
+        state.cash -= cost;
+        state.ledger.stockPurchases += cost;
+        S.add(state.stock[ev.dept].dock, [{ qty: E.nearDate.qty, unitCost: unit, expiresAt: useByExpiry(E.nearDate.days), label: `Use by ${weekdayName(state.ctx.weekday + E.nearDate.days)}` }]);
+        result = `${E.nearDate.qty} cheap ${deptName(ev.dept).toLowerCase()} items are on the dock. Someone needs to unload them.`;
+      } else result = 'You pass. The wholesaler tries the shop down the road.';
+      break;
+    case 'complaint':
+      if (option === 0) {
+        spend(E.complaint.voucher);
+        mood(E.complaint.voucherMood, E.complaint.moodMinutes, 'Made up for a complaint');
+        result = 'The customer leaves smiling, voucher in hand.';
+      } else if (option === 1) {
+        mood(E.complaint.apologyMood, E.complaint.moodMinutes, 'Apologised to a customer');
+        result = 'The customer accepts the apology.';
+      } else {
+        mood(E.complaint.brushOffMood, E.complaint.moodMinutes, 'Brushed off a complaint');
+        result = 'The customer tuts loudly enough for the whole queue to hear.';
+      }
+      break;
+    case 'donation':
+      if (option === 0) {
+        spend(E.donation.cost);
+        mood(E.donation.mood, E.donation.moodMinutes, 'Donated to the school fête');
+        result = 'The school puts your name on the raffle poster.';
+      } else result = 'The school thanks you anyway.';
+      break;
+  }
+  floor.pending = null;
+  floor.lastAnswer = result;
+  floor.counts.answered += 1;
+  return { live: next, result };
+}
+
+/** Runs up to `minutes` minutes, stopping at closing and at a question waiting for an answer. */
 export function advance(input: Live, minutes: number): { live: Live; reports: HourReport[] } {
-  let live = settle(input);
+  let live = raiseDue(settle(input));
   let left = Math.round(minutes);
   const reports: HourReport[] = [];
-  while (left > 0 && !isClosed(live)) {
+  while (left > 0 && !isClosed(live) && !live.state.floor?.pending) {
     const now = stepOf(live.state);
-    const nextBreakEnd = Object.values(live.breakSince).reduce((m, t) => Math.min(m, t + BREAK_STEPS), Infinity);
-    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now));
+    const nextBreakEnd = Object.values(live.breakUntil).reduce((m, t) => Math.min(m, t), Infinity);
+    const nextEvent = live.state.floor?.events[0]?.at ?? Infinity;
+    // While someone is on a floor job, go a minute at a time so they head back the minute it's done.
+    const working = live.state.floor?.tasks.some((t) => t.assigned !== null) ? 1 : Infinity;
+    const n = Math.max(1, Math.min(left, STEPS - (live.state.step ?? 0), nextBreakEnd - now, nextEvent - now, working));
     const r = runSteps(live.state, live.plan, n);
     reports.push(r.report);
-    live = settle({ ...live, state: r.state });
+    live = raiseDue(settle({ ...live, state: r.state }));
     left -= n;
   }
   return { live, reports };
@@ -129,11 +327,13 @@ export function moveStaff(live: Live, staffId: string, job: AssignmentId): Recor
   if (jobProblem(live, staffId, job)) return null;
   const cur = live.plan.assignments[staffId];
   if (cur === job) return null;
+  // Someone leaving a floor job (or a break) swaps into where they were going back to.
+  const from = cur === 'task' || cur === 'break' ? (live.returnTo[staffId] ?? 'tills') : cur;
   const next = { ...live.plan.assignments, [staffId]: job };
   if (count(live.plan, job, staffId) >= assignmentLimit(job, live.state)) {
     const other = Object.keys(live.plan.assignments).find((id) => id !== staffId && live.plan.assignments[id] === job);
     if (!other) return null;
-    next[other] = cur;
+    next[other] = from;
   }
   return next;
 }
@@ -145,29 +345,58 @@ export function choose(input: Live, c: Choice): Live {
   switch (c.kind) {
     case 'jobs': {
       const plan = { ...live.plan, assignments: { ...c.assignments } };
-      const breakSince = { ...live.breakSince };
+      const breakUntil = { ...live.breakUntil };
       const returnTo = { ...live.returnTo };
+      let state = live.state;
       for (const s of onShift(live.state)) {
         const was = live.plan.assignments[s.id];
         const now = plan.assignments[s.id];
         if (now === 'break' && was !== 'break') {
-          breakSince[s.id] = stepOf(live.state);
-          returnTo[s.id] = was ?? 'tills';
-        } else if (now !== 'break') {
-          delete breakSince[s.id];
+          breakUntil[s.id] = stepOf(live.state) + BREAK_STEPS;
+          returnTo[s.id] = was === 'task' ? (live.returnTo[s.id] ?? 'tills') : (was ?? 'tills');
+        } else if (now !== 'break' && now !== 'task') {
+          delete breakUntil[s.id];
           delete returnTo[s.id];
+        }
+        // Leaving a floor job leaves it for someone else.
+        if (was === 'task' && now !== 'task' && state.floor?.tasks.some((t) => t.assigned === s.id)) {
+          if (state === live.state) state = structuredClone(live.state);
+          for (const t of state.floor!.tasks) if (t.assigned === s.id) t.assigned = null;
         }
       }
       for (const a of new Set(Object.values(plan.assignments))) {
         if (count(plan, a) > assignmentLimit(a, live.state)) throw new Error('Too many people in one place.');
       }
-      return settle({ ...live, plan, breakSince, returnTo });
+      return settle({ ...live, state, plan, breakUntil, returnTo });
     }
     case 'prices':
       if (!live.state.ctx.pricing && DEPTS.some((d) => c.pricing[d] !== live.plan.pricing[d])) throw new Error('Prices can’t be changed yet.');
       return { ...live, plan: { ...live.plan, pricing: { ...c.pricing } } };
     case 'action':
       return { ...live, state: takeAction(live.state, c.action) };
+    case 'task': {
+      const task = live.state.floor?.tasks.find((t) => t.id === c.taskId);
+      if (!task) throw new Error('That job has already gone.');
+      if (!onShift(live.state).some((s) => s.id === c.staffId)) throw new Error('Not on shift.');
+      if (task.assigned === c.staffId) return live;
+      const state = structuredClone(live.state);
+      for (const t of state.floor!.tasks) {
+        if (t.assigned === c.staffId) t.assigned = null;
+        if (t.id === c.taskId) t.assigned = c.staffId;
+      }
+      const was = live.plan.assignments[c.staffId];
+      const assignments = { ...live.plan.assignments, [c.staffId]: 'task' as AssignmentId };
+      // Whoever was on this job goes back to theirs.
+      if (task.assigned && task.assigned !== c.staffId) assignments[task.assigned] = live.returnTo[task.assigned] ?? 'tills';
+      const returnTo = { ...live.returnTo, [c.staffId]: was === 'task' || was === 'break' ? (live.returnTo[c.staffId] ?? 'tills') : was };
+      const breakUntil = { ...live.breakUntil };
+      delete breakUntil[c.staffId];
+      return settle({ ...live, state, plan: { ...live.plan, assignments }, returnTo, breakUntil });
+    }
+    case 'answer': {
+      if (live.state.floor?.pending?.id !== c.eventId) throw new Error('That question isn’t waiting.');
+      return settle(answer(live, c.option).live);
+    }
   }
 }
 
@@ -181,22 +410,57 @@ export function choicesFor(live: Live, next: HourPlan): Choice[] {
   return out;
 }
 
+/**
+ * Runs `minutes` minutes, answering each question with its first answer.
+ * For tests, scripted play and converting old saves; `made` collects the answers as choices.
+ */
+export function advanceAnswering(input: Live, minutes: number, made: Choice[] = []): Live {
+  let live = input;
+  const end = stepOf(live.state) + minutes;
+  while (!isClosed(live) && stepOf(live.state) < end) {
+    const p = live.state.floor?.pending;
+    if (p) {
+      const c: Choice = { at: stepOf(live.state), kind: 'answer', eventId: p.id, option: 0 };
+      live = choose(live, c);
+      made.push(c);
+      continue;
+    }
+    live = advance(live, end - stepOf(live.state)).live;
+  }
+  const p = live.state.floor?.pending;
+  if (p && !isClosed(live)) {
+    const c: Choice = { at: stepOf(live.state), kind: 'answer', eventId: p.id, option: 0 };
+    live = choose(live, c);
+    made.push(c);
+  }
+  return live;
+}
+
 /** Rebuilds a day from its opening state, its choices and how far it had got. */
-export function replayLive(start: SimState, choices: Choice[], upTo: number): Live {
-  let live = startLive(start);
+export function replayLive(start: SimState, choices: Choice[], upTo: number, autoAnswer?: Choice[]): Live {
+  let live = raiseDue(startLive(start));
   const sorted = [...choices].sort((a, b) => a.at - b.at);
   let i = 0;
   while (true) {
     const now = stepOf(live.state);
     while (i < sorted.length && sorted[i].at <= now) {
       try {
-        live = choose(live, sorted[i]);
+        live = raiseDue(choose(live, sorted[i]));
       } catch {
         /* A choice that no longer applies is skipped. */
       }
       i += 1;
     }
-    if (isClosed(live) || now >= upTo) break;
+    // Old saves have no answers: give the first one (and keep it, so the save replays the same way).
+    const p = live.state.floor?.pending;
+    if (p && autoAnswer && now < upTo) {
+      const c: Choice = { at: now, kind: 'answer', eventId: p.id, option: 0 };
+      live = choose(live, c);
+      autoAnswer.push(c);
+      continue;
+    }
+    // Stop at the minute reached, at closing, or at a question still waiting for its answer.
+    if (isClosed(live) || now >= upTo || p) break;
     const nextAt = i < sorted.length ? sorted[i].at : Infinity;
     live = advance(live, Math.min(upTo, nextAt) - now).live;
   }

@@ -4,7 +4,7 @@ import { STEP_MINUTES, assignmentLimit, clockLabel, expectedCustomers, deptUnits
 import { intervalOutcomes, jobPreview, outlook, problems as computeProblems, type Outlook } from '../sim/insight';
 import { ASSIGNMENT_FUTURE, ASSIGNMENT_LABEL } from '../sim/roster';
 import type { AssignmentId, HourPlan, HourReport, SimState, StaffMember } from '../sim/types';
-import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type ShopNotice, type StoreView, type ZoneId } from './Store';
+import { fitFromContext, Store, storeViewFromState, ZONE_JOB, ZONE_NAME, type Activity, type CoinPop, type JobHint, type StoreFloor, type ShopNotice, type StoreView, type ZoneId } from './Store';
 import { stepActivity } from './activity';
 import type { LessonFocus } from '../sim/tutorial';
 
@@ -72,11 +72,17 @@ interface Props {
   pops?: CoinPop[];
   /** Live play: the clock is paused. */
   paused?: boolean;
+  /** Live play: floor jobs and the cue at the door. */
+  floor?: StoreFloor;
+  /** Live play: send someone to a floor job. */
+  onAssignTask?: (taskId: string, staffId: string) => void;
+  /** Live play: a line to show briefly (e.g. what an answer did). */
+  notice?: { id: number; text: string } | null;
 }
 
 const STEP_MS = { normal: 800, fast: 380 };
 
-export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices, onMove, clock, pops, paused }: Props) {
+export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices, onMove, clock, pops, paused, floor, onAssignTask, notice }: Props) {
   const live = phase === 'live';
   /** Planning or playing live: the shop can be changed. */
   const planning = phase === 'plan' || live;
@@ -177,6 +183,26 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
     [plan, onMove, state, say],
   );
 
+  /** Live play: a floor job dropped on or chosen; with nobody selected, says what it needs. */
+  const onTask = useCallback(
+    (taskId: string, staffId: string | null) => {
+      const t = state.floor?.tasks.find((x) => x.id === taskId);
+      if (!t || !onAssignTask) return;
+      const k = CONFIG.floor.tasks.kinds[t.kind];
+      if (!staffId) {
+        say(t.assigned ? `${state.staff.find((s) => s.id === t.assigned)?.name} is on it: ${k.label.toLowerCase()}.` : `${k.label}: drag someone here (about ${k.work} minute${k.work === 1 ? '' : 's'}).`);
+        return;
+      }
+      setSelState(null);
+      onAssignTask(taskId, staffId);
+      say(`${state.staff.find((s) => s.id === staffId)?.name} → ${k.label.toLowerCase()}`);
+    },
+    [state, onAssignTask, say],
+  );
+  useEffect(() => {
+    if (notice?.text) say(notice.text);
+  }, [notice, say]);
+
   const onZone = useCallback(
     (a: AssignmentId) => {
       if (!selectedId || !plan) return;
@@ -227,7 +253,7 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
   const problemZones = useMemo(() => {
     if (!planning || !plan || !interactive) return undefined;
     const out: Partial<Record<ZoneId, 'urgent' | 'warn'>> = {};
-    for (const p of computeProblems(state, plan)) if (out[p.zone] !== 'urgent') out[p.zone] = p.level;
+    for (const p of computeProblems(state, plan)) if (!p.floor && out[p.zone] !== 'urgent') out[p.zone] = p.level;
     return out;
   }, [planning, plan, state, interactive]);
 
@@ -271,6 +297,8 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
             animating={phase === 'replay' || (live && !paused)}
             onDrop={onMove && interactive ? moveTo : undefined}
             pops={pops}
+            floor={floor}
+            onTask={onAssignTask && interactive ? onTask : undefined}
             reducedMotion={reduced}
             highlightZones={lessonTarget.zones}
             highlightStaff={lessonTarget.staff}

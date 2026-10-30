@@ -12,7 +12,8 @@
     "balance": "vite-node scripts/balance.ts",
     "consequence": "vite-node scripts/consequence.ts",
     "pricing": "vite-node scripts/pricing.ts",
-    "campaign": "vite-node scripts/campaign.ts"
+    "campaign": "vite-node scripts/campaign.ts",
+    "pacing": "vite-node scripts/pacing.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

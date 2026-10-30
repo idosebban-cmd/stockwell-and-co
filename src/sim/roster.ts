@@ -76,6 +76,7 @@ export const ASSIGNMENT_LABEL: Record<AssignmentId, string> = {
   'replenish:ambient': 'Fill grocery shelves',
   receive: 'Unload delivery',
   break: 'Take a break',
+  task: 'Sort out a floor job',
 };
 
 /** "Mags will unload deliveries next hour." */
@@ -86,4 +87,5 @@ export const ASSIGNMENT_FUTURE: Record<AssignmentId, string> = {
   'replenish:ambient': 'fill the grocery shelves',
   receive: 'unload deliveries',
   break: 'take a break',
+  task: 'sort out a floor job',
 };

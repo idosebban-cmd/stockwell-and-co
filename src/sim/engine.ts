@@ -8,6 +8,7 @@
  */
 import { CONFIG, DEPTS, deptName, hourLabel, type ChilledLife, type DeptId, type PriceTier } from './config';
 import { makeScenario } from './scenario';
+import { burstArrivals, floorMood, makeFloor, spawnAndExpire } from './floor';
 import { makeStaff, ROSTER, TEMP_ENTRY } from './roster';
 import * as S from './stock';
 import type {
@@ -281,6 +282,7 @@ export function startShift(input: ShiftInput): SimState {
     history: [],
     announcements: [...input.announcements],
     idCounter: 0,
+    floor: makeFloor(seed + Math.floor(scenario.customerNoise.reduce((t, x, i) => t + x * (i + 1), 0) * 100_000), ctx, scenario.forecast),
   };
   for (const d of DEPTS) {
     const qty = Math.round(setup.orders[d].midday);
@@ -619,6 +621,7 @@ export function describeAction(state: SimState, a: ActionRequest, alreadyPlanned
 // ---------------------------------------------------------------------------
 
 export function assignmentLimit(a: AssignmentId, state?: SimState): number {
+  if (a === 'task') return 99;
   if (a === 'tills') return state ? state.ctx.tills : C.staff.limits.tills;
   if (state && a.startsWith('replenish:') && !hasDept(state, a.split(':')[1] as DeptId)) return 0;
   if (a === 'receive') return C.staff.limits.receive;
@@ -657,6 +660,7 @@ function labelFor(a: AssignmentId): string {
   if (a === 'tills') return 'The tills';
   if (a === 'receive') return 'The delivery dock';
   if (a === 'break') return 'The break room';
+  if (a === 'task') return 'Floor jobs';
   return `${deptName(a.split(':')[1] as DeptId)}`;
 }
 
@@ -861,6 +865,9 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
       messages.push(`The engineer fixed chiller cabinet 2 at ${clockLabel(h, k)}. He took a biscuit.`);
     }
 
+    // Floor jobs appear (and unattended ones that have run their time go away).
+    if (state.floor) spawnAndExpire(state.floor, abs, messages);
+
     // Capacities this minute, from each person's energy now.
     let tillCap = 0;
     let receiveCap = 0;
@@ -940,7 +947,7 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
     }
 
     // 4. Customers arrive and pick what is on the shelves.
-    const arrivals = hourCustomers * footfallMultiplier(state) * stepShare;
+    const arrivals = (hourCustomers * stepShare + (opts.forecastOnly ? 0 : burstArrivals(state.floor, abs))) * footfallMultiplier(state);
     arrivedTotal += arrivals;
     const empty: DeptId[] = [];
     const stepDept = perDept(() => ({ wanted: 0, picked: 0 }));
@@ -1045,6 +1052,18 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
         const drain = C.staff.energy[key] * (m.speciality === 'stamina' ? C.staff.staminaDrain : 1);
         m.energy = Math.max(0, m.energy + drain * stepShare);
         m.stepsWorked = (m.stepsWorked ?? 0) + 1;
+        // A floor job gets a minute of work.
+        if (a === 'task' && state.floor) {
+          const t = state.floor.tasks.find((x) => x.assigned === m.id);
+          if (t) {
+            t.progress += productivity(m.energy) * (m.isTemp ? C.actions.temp.productivity : 1);
+            if (t.progress >= t.work - 1e-9) {
+              state.floor.tasks = state.floor.tasks.filter((x) => x !== t);
+              state.floor.counts.resolved += 1;
+              messages.push(`${m.name} sorted it: ${C.floor.tasks.kinds[t.kind].short.toLowerCase()} done.`);
+            }
+          }
+        }
       }
       if (m.isTemp) addExtra(state, 'Agency temp', C.actions.temp.hourlyFee * stepShare);
       else {
@@ -1058,6 +1077,8 @@ export function runSteps(input: SimState, plan: HourPlan, n: number, opts: RunOp
     if (arrivals > 0) {
       const stepWait = s + left > 0 ? Math.min(wait, 45) : 0;
       const sat = satisfactionScore(state, h, stepDept, stepMults, stepWait, left, arrivals);
+      // Floor jobs and answers can't be foreseen, so previews leave them out.
+      if (!opts.forecastOnly) sat.score = clamp(sat.score + floorMood(state.floor, abs, state.ctx.penaltyScale ?? 1), 0, 100);
       state.satisfaction.weightedSum += sat.score * arrivals;
       state.satisfaction.customers += arrivals;
       satWeighted += sat.score * arrivals;

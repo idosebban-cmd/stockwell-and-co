@@ -3,7 +3,8 @@ import { CONFIG, DEPTS, type DeptId } from '../sim/config';
 import type { DayContext } from '../sim/types';
 import { assignmentLimit, productivity } from '../sim/engine';
 import { ASSIGNMENT_LABEL } from '../sim/roster';
-import type { AssignmentId, StaffMember } from '../sim/types';
+import type { AssignmentId, FloorTask, StaffMember } from '../sim/types';
+import type { TaskPlace } from '../sim/config';
 import { DroppedBasket, poseFor, Shopper, StaffFigure } from './art/Characters';
 
 export type ZoneId = 'produce' | 'chilled' | 'ambient' | 'tills' | 'dock' | 'break';
@@ -124,6 +125,45 @@ interface Props {
   onDrop?: (staffId: string, job: AssignmentId) => void;
   /** Coins popping up over the tills as they take money. */
   pops?: CoinPop[];
+  /** Live play: floor jobs and the cue at the door. */
+  floor?: StoreFloor;
+  /** Live play: send someone to a floor job (dropped on it, or the job chosen with them selected). With no one, says what it needs. */
+  onTask?: (taskId: string, staffId: string | null) => void;
+}
+
+export interface StoreFloor {
+  tasks: FloorTask[];
+  /** A burst announced at the door. */
+  door: { text: string; detail: string; arriving: boolean } | null;
+}
+
+/** Where floor jobs appear, per place (viewBox units). */
+const TASK_XY: Record<TaskPlace, [number, number][]> = {
+  produce: [
+    [160, 300],
+    [92, 446],
+    [246, 446],
+  ],
+  chilled: [
+    [430, 290],
+    [650, 290],
+    [870, 290],
+  ],
+  ambient: [
+    [470, 352],
+    [690, 398],
+    [880, 352],
+  ],
+  tills: [
+    [700, 506],
+    [700, 576],
+  ],
+  entrance: [[237, 622]],
+};
+
+export function taskXY(t: FloorTask): [number, number] {
+  const spots = TASK_XY[t.place];
+  return spots[Math.min(t.spot, spots.length - 1)];
 }
 
 export interface CoinPop {
@@ -174,6 +214,8 @@ const SLOTS: Record<AssignmentId, [number, number][]> = {
     [772, 128],
     [846, 128],
   ],
+  // People on floor jobs stand at the job (see `taskSpot`); this is only a fallback.
+  task: [[200, 462]],
 };
 
 const ZONES: { z: ZoneId; x: number; y: number; w: number; h: number; mark: [number, number] }[] = [
@@ -230,6 +272,12 @@ function StoreImpl(props: Props) {
     if (!a) continue;
     const i = counts.get(a) ?? 0;
     counts.set(a, i + 1);
+    const job = a === 'task' ? props.floor?.tasks.find((t) => t.assigned === s.id) : undefined;
+    if (job) {
+      const [tx, ty] = taskXY(job);
+      placed.push({ s, a, x: tx + 36, y: ty + 30 });
+      continue;
+    }
     const slot = SLOTS[a][Math.min(i, SLOTS[a].length - 1)];
     placed.push({ s, a, x: slot[0] + (i >= SLOTS[a].length ? 20 : 0), y: slot[1] });
   }
@@ -248,7 +296,13 @@ function StoreImpl(props: Props) {
     return [p.x, p.y];
   };
   const zoneAt = (x: number, y: number) => zones.find((z) => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h);
-  const dropZone = drag?.moved ? zoneAt(drag.x, drag.y) : undefined;
+  const taskAt = (x: number, y: number) =>
+    props.onTask ? props.floor?.tasks.find((t) => {
+      const [tx, ty] = taskXY(t);
+      return Math.hypot(x - tx, y - ty) < 38;
+    }) : undefined;
+  const dropTask = drag?.moved ? taskAt(drag.x, drag.y) : undefined;
+  const dropZone = drag?.moved && !dropTask ? zoneAt(drag.x, drag.y) : undefined;
   const startDrag = (id: string, e: ReactPointerEvent) => {
     if (!draggable || e.button !== 0) return;
     e.stopPropagation();
@@ -269,8 +323,10 @@ function StoreImpl(props: Props) {
   const endDrag = () => {
     if (!drag) return;
     if (drag.moved) {
+      const t = taskAt(drag.x, drag.y);
       const z = zoneAt(drag.x, drag.y);
-      if (z) props.onDrop?.(drag.id, ZONE_JOB[z.z]);
+      if (t) props.onTask?.(t.id, drag.id);
+      else if (z) props.onDrop?.(drag.id, ZONE_JOB[z.z]);
     } else if (drag.wasSelected) onSelectStaff(drag.id);
     setDrag(null);
   };
@@ -388,6 +444,7 @@ function StoreImpl(props: Props) {
           return <HintPill key={zone.z} zone={zone} hint={hint} />;
         })}
 
+      {props.floor && <FloorLayer floor={props.floor} selected={selected} interactive={interactive && !!props.onTask} target={dropTask?.id ?? null} onTask={props.onTask} motion={!reducedMotion} />}
       {props.pops && !reducedMotion && <CoinPops pops={props.pops} />}
 
       {placed.map(({ s, a, x, y }) => {
@@ -995,6 +1052,94 @@ function ZoneBadge({ x, y, n, lim }: { x: number; y: number; n: number; lim: num
       </text>
     </g>
   );
+}
+
+/** Floor jobs as "!" markers on the spot, and the cue at the door when a burst is coming. */
+function FloorLayer({
+  floor,
+  selected,
+  interactive,
+  target,
+  onTask,
+  motion,
+}: {
+  floor: StoreFloor;
+  selected: string | null;
+  interactive: boolean;
+  target: string | null;
+  onTask?: (taskId: string, staffId: string | null) => void;
+  motion: boolean;
+}) {
+  return (
+    <g>
+      {floor.door && (
+        <g className={`door-cue ${floor.door.arriving ? 'arriving' : ''} ${motion ? 'pulse' : ''}`} transform="translate(30 604)" role="status" aria-label={`${floor.door.text}. ${floor.door.detail}`}>
+          <rect width="250" height="34" rx="10" fill={floor.door.arriving ? 'var(--burgundy)' : 'var(--mustard)'} stroke="var(--burgundy-dark)" strokeWidth="1.5" />
+          <text x="12" y="15" fontSize="12" fontWeight="800" fill={floor.door.arriving ? 'var(--paper)' : 'var(--ink)'}>
+            {floor.door.text}
+          </text>
+          <text x="12" y="28" fontSize="10.5" fill={floor.door.arriving ? 'var(--paper)' : 'var(--ink)'}>
+            {floor.door.detail}
+          </text>
+        </g>
+      )}
+      {floor.tasks.map((t) => {
+        const [x, y] = taskXY(t);
+        const k = CONFIG.floor.tasks.kinds[t.kind];
+        const open = t.assigned === null;
+        const act = () => interactive && onTask?.(t.id, selected);
+        const done = Math.min(1, t.progress / t.work);
+        return (
+          <g
+            key={t.id}
+            className={`floor-task ${open ? 'open' : 'working'} ${target === t.id ? 'drop' : ''} ${selected && open ? 'armed' : ''}`}
+            transform={`translate(${x} ${y})`}
+            role={interactive ? 'button' : undefined}
+            tabIndex={interactive ? 0 : undefined}
+            aria-label={`${k.label}${open ? `: needs someone for ${k.work} minute${k.work === 1 ? '' : 's'}` : ', being sorted'}.${selected && open ? ' Send the selected person.' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              act();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                act();
+              }
+            }}
+          >
+            <title>{k.label}</title>
+            <circle r="24" fill="transparent" />
+            {target === t.id && <circle r="26" fill="rgba(227,178,60,0.3)" stroke="var(--mustard)" strokeWidth="3" />}
+            <circle r="13" fill={open ? 'var(--bad)' : 'var(--paper)'} stroke={open ? '#7a1f1a' : 'var(--good)'} strokeWidth="2" className={open && motion ? 'task-bob' : ''} />
+            {open ? (
+              <text y="5" textAnchor="middle" fontSize="16" fontWeight="900" fill="#fff">
+                !
+              </text>
+            ) : (
+              <path d={arc(done)} fill="var(--good)" />
+            )}
+            <g transform="translate(0 20)">
+              <rect x="-34" y="0" width="68" height="15" rx="7" fill="var(--paper)" stroke={open ? 'var(--bad)' : 'var(--line-strong)'} />
+              <text y="11" textAnchor="middle" fontSize="9.5" fontWeight="800" fill="var(--ink)">
+                {k.short}
+              </text>
+            </g>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/** A pie slice for a job's progress (0..1), inside the marker. */
+function arc(f: number): string {
+  if (f <= 0) return '';
+  if (f >= 0.999) return 'M0 -10 A10 10 0 1 1 -0.01 -10 Z';
+  const a = f * Math.PI * 2;
+  const x = Math.sin(a) * 10;
+  const y = -Math.cos(a) * 10;
+  return `M0 0 L0 -10 A10 10 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z`;
 }
 
 function CoinPops({ pops }: { pops: CoinPop[] }) {

@@ -3798,3 +3798,84 @@ ul.tannoy {
 .indicators li.plain .ind-value {
   color: var(--ink);
 }
+.floor-task {
+  cursor: pointer;
+}
+.floor-task.working {
+  cursor: default;
+}
+.floor-task:focus-visible circle:first-of-type {
+  stroke: var(--burgundy);
+  stroke-width: 3;
+}
+.floor-task.armed circle:nth-of-type(2) {
+  stroke: var(--mustard);
+  stroke-width: 3;
+}
+.task-bob {
+  animation: task-bob 1.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes task-bob {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+.door-cue.pulse:not(.arriving) rect {
+  animation: door-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes door-pulse {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.reduced-motion .task-bob,
+.reduced-motion .door-cue rect {
+  animation: none !important;
+}
+.event-card .event-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.event-card .event-option {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--line-strong);
+  background: var(--paper);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.event-card .event-option:hover,
+.event-card .event-option:focus-visible {
+  border-color: var(--burgundy);
+}
+.event-card .event-option strong {
+  display: block;
+}
+.event-card .event-option span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.pacing-debug {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 50;
+  background: rgba(43, 35, 32, 0.85);
+  color: #fff;
+  font: 11px/1.3 ui-monospace, monospace;
+  padding: 4px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+}

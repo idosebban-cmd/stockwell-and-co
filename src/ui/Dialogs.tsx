@@ -48,7 +48,8 @@ export function Help({ onClose }: { onClose: () => void }) {
         </p>
         <h3>The clock</h3>
         <p>
-          The shop runs in real time: an hour takes about a minute at 1x. <strong>Space</strong> pauses and carries on; 1, 2 and 3 set the speed. While paused you can still
+          The shop runs in real time: an hour takes about a minute at 1x. There are usually more jobs than people, so keep an eye on the queue, the shelves and the
+          floor. <strong>Space</strong> pauses and carries on; 1, 2 and 3 set the speed. While paused you can still
           move people and take actions, then carry on to see what happens.
         </p>
         <h3>Each morning</h3>
@@ -60,6 +61,18 @@ export function Help({ onClose }: { onClose: () => void }) {
         <ol>
           <li>Drag a person to a place to give them that job; they walk over and start straight away. (Or click a person, then a place.) Moving someone to a full place swaps them with the person there.</li>
           <li>Send people to the break room: a break lasts half an hour, then they go back to what they were doing.</li>
+          <li>
+            <strong>Floor jobs</strong> pop up as a red “!” where they happen: a spill, a shopper who can’t find something, a price check, a cage in the aisle, baskets
+            running out. Customers nearby get grumpier until someone sorts it: drag a person onto the “!”. It takes a minute or three, then they go back to their job.
+          </li>
+          <li>
+            <strong>Bursts:</strong> a sign at the door warns a few minutes ahead when a bus, the school run or the after-church crowd is coming. Open another till before
+            they reach it.
+          </li>
+          <li>
+            <strong>Questions</strong> (a tired colleague, a regular’s favour, a cheap offer from the wholesaler, a complaint) pause the day until you choose. Each answer
+            says what it will do.
+          </li>
           <li>Check <strong>Needs attention</strong> under the shop, or click a red or yellow “!” on a fixture. Each opens the problem with the actions that work, their cost and timing.</li>
           <li>Click a department to see its stock, who is filling it and its price. <strong>Change prices</strong> compares Low, Regular and High.</li>
         </ol>

@@ -190,6 +190,7 @@ export function dayContext(camp: CampaignState): DayContext {
     actions: dayActions(camp.day).filter((a) => (a === 'repair' ? depts.includes('chilled') : true)),
     pricing: camp.day >= K.unlocks.pricing,
     patienceBonus: isGenerous(camp.day) ? K.generous.patienceBonusMinutes : 0,
+    penaltyScale: isGenerous(camp.day) ? K.generous.penaltyScale : 1,
   };
 }
 
@@ -318,7 +319,8 @@ export function recommendOrder(camp: CampaignState): SetupPlan {
   for (const d of ctx.depts) {
     const per = C.departments[d].basket * ctx.range[d] * tierDemand(d, pricing[d]) * tripMultiplier(pricing, d);
     const upTo = (h: number) => sc.forecast.slice(0, h).reduce((t, x) => t + x, 0) * per;
-    const cover = d === 'ambient' ? 1.15 : 1.03;
+    // A margin for the day's bursts of shoppers, more for cupboard stock, which keeps.
+    const cover = d === 'ambient' ? 1.25 : 1.1;
     const total = upTo(ctx.hours) * cover;
     const space = Math.max(0, ctx.shelfCap[d] + ctx.backroomCap[d] - have[d]);
     const want = Math.max(0, total - have[d]);
@@ -365,7 +367,9 @@ export function finishDay(camp: CampaignState, state: SimState): { camp: Campaig
     return { id: cs.id, fatigue: cs.fatigue * K.fatigue.carry + (s?.strain ?? 0) };
   });
   const sat = satisfactionSoFar(state);
-  const reputation = camp.reputation + (sat - camp.reputation) * K.reputation.pull;
+  // In the first days a poor day costs less reputation.
+  const pull = K.reputation.pull * (sat < camp.reputation && isGenerous(camp.day) ? K.generous.reputationDropScale : 1);
+  const reputation = camp.reputation + (sat - camp.reputation) * pull;
   const reports = state.history;
   const profit = operatingProfit(state);
   const next: CampaignState = {
@@ -676,6 +680,10 @@ export function convertCampaignV1(old: { seed: number; days: { setup: SetupPlan 
     if (!d.setup) break;
     const hours = dayConfig(record.camp.day).hours;
     const today: CampaignDayPlay = { setup: d.setup, choices: choicesFromHourlyPlans(d.plans), minute: Math.min(d.plans.length, hours) * C.stepsPerHour };
+    // Questions from the floor didn't exist then: they get the first answer.
+    const answers: Choice[] = [];
+    replayLive(startCampaignDay(record.camp, d.setup), today.choices, today.minute, answers);
+    today.choices.push(...answers);
     record = { ...record, today, purchases: d.purchases };
     if (!d.done) break;
     const live = replayToday(record)!;

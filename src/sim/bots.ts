@@ -6,6 +6,8 @@ import { CONFIG, DEPTS, type DeptId } from './config';
 import { defaultPlan, deptUnits, describeAction, expectedCustomers, hasDept, onShift, recommendedSetup, runHour, startDay } from './engine';
 import type { ActionRequest, AssignmentId, HourPlan, HourReport, SetupPlan, SimState } from './types';
 import { total } from './stock';
+import { advance, choose, isClosed, startLive, stepOf, type Choice, type Live } from './live';
+import { burstAtDoor } from './floor';
 import { allOffers, buy, finishDay, WEEK_DAYS, newCampaign, recommendOrder, startCampaignDay, type CampaignState, type DayResult, type UpgradeId } from './campaign';
 
 export type Strategy = (state: SimState) => HourPlan;
@@ -14,6 +16,74 @@ export interface ShiftResult {
   state: SimState;
   reports: HourReport[];
   plans: HourPlan[];
+}
+
+/**
+ * Plays a day live: `strategy` sets the jobs at the start of each hour, and in
+ * between the player reacts like an attentive manager: a spare person goes to
+ * each floor job, a filler opens another till when a burst is announced, and
+ * questions get the first (usually kind) answer.
+ */
+export function playLiveDay(start: SimState, strategy: Strategy, onMinute?: (live: Live) => void): SimState {
+  let live = startLive(start);
+  let planned = -1;
+  const act = (c: Choice) => {
+    try {
+      live = choose(live, c);
+    } catch {
+      /* not possible now */
+    }
+  };
+  while (!isClosed(live)) {
+    const st = live.state;
+    const now = stepOf(st);
+    const f = st.floor;
+    if (f?.pending) {
+      act({ at: now, kind: 'answer', eventId: f.pending.id, option: 0 });
+      continue;
+    }
+    if (planned !== st.hour) {
+      planned = st.hour;
+      const p = strategy(st);
+      act({ at: now, kind: 'jobs', assignments: p.assignments });
+      act({ at: now, kind: 'prices', pricing: p.pricing });
+      for (const a of p.actions) act({ at: now, kind: 'action', action: a });
+    }
+    // A burst at the door: open another till if one is free.
+    const door = burstAtDoor(live.state.floor, now);
+    const plan = live.plan;
+    const tillsOpen = Object.values(plan.assignments).filter((a) => a === 'tills').length;
+    if (door && tillsOpen < live.state.ctx.tills) {
+      const filler = onShift(live.state).find((s) => plan.assignments[s.id]?.startsWith('replenish:'));
+      if (filler) act({ at: now, kind: 'jobs', assignments: { ...plan.assignments, [filler.id]: 'tills' } });
+    }
+    // Floor jobs: send someone who isn't serving (or a second person from the tills).
+    for (const t of live.state.floor?.tasks.filter((x) => x.assigned === null) ?? []) {
+      const p2 = live.plan.assignments;
+      const tills = Object.values(p2).filter((a) => a === 'tills').length;
+      const pool = onShift(live.state).filter((s) => p2[s.id] !== 'break' && p2[s.id] !== 'task');
+      const helper =
+        pool.find((s) => p2[s.id] === 'receive' || p2[s.id]?.startsWith('replenish:')) ?? (tills > 1 ? pool.find((s) => p2[s.id] === 'tills') : undefined);
+      if (helper) act({ at: now, kind: 'task', staffId: helper.id, taskId: t.id });
+    }
+    // Run to the next moment worth looking at.
+    const fl = live.state.floor;
+    const next = Math.min(
+      (live.state.hour + 1) * CONFIG.stepsPerHour,
+      fl?.schedule[0]?.at ?? Infinity,
+      fl?.bursts.find((b) => b.warnAt > now)?.warnAt ?? Infinity,
+      ...Object.values(live.breakUntil),
+      fl?.tasks.some((x) => x.assigned) ? now + 1 : Infinity,
+    );
+    // With a watcher, go a minute at a time so it sees every minute.
+    live = advance(live, onMinute ? 1 : Math.max(1, next - now)).live;
+    onMinute?.(live);
+  }
+  return live.state;
+}
+
+export function playShiftLive(seed: number, strategy: Strategy, setup: SetupPlan = recommendedSetup()): SimState {
+  return playLiveDay(startDay(seed, setup), strategy);
 }
 
 export function playShift(seed: number, strategy: Strategy, setup: SetupPlan = recommendedSetup()): ShiftResult {
@@ -162,6 +232,7 @@ export function fixLimits(state: SimState, plan: HourPlan, avoid: AssignmentId[]
     'replenish:ambient': hasDept(state, 'ambient') ? CONFIG.staff.limits.replenish : 0,
     receive: CONFIG.staff.limits.receive,
     break: CONFIG.staff.limits.break,
+    task: 0,
   };
   const counts = new Map<AssignmentId, number>();
   for (const s of onShift(state)) {
@@ -191,8 +262,7 @@ export function playCampaign(seed: number, strategy: Strategy, invest: InvestPol
   let camp = newCampaign(seed);
   const days: WeekResult['days'] = [];
   while (camp.day < count) {
-    let state = startCampaignDay(camp, order(camp));
-    while (state.hour < state.ctx.hours) state = runHour(state, strategy(state)).state;
+    const state = playLiveDay(startCampaignDay(camp, order(camp)), strategy);
     const done = finishDay(camp, state);
     camp = done.camp;
     const bought: UpgradeId[] = [];

@@ -15,7 +15,7 @@ import {
   startDay,
   wellbeing,
 } from './engine';
-import { fixLimits, noBreaks, noReplenishment, oneTill, passive, playShift, sensible, type Strategy } from './bots';
+import { fixLimits, playShiftLive, noBreaks, noReplenishment, oneTill, passive, playShift, sensible, type Strategy } from './bots';
 import { CURATED_SEED, makeScenario } from './scenario';
 import { total } from './stock';
 import { convertRecordV3, newRecord, rebuild, retryRecord } from './game';
@@ -517,14 +517,14 @@ describe('balance: complete shifts', () => {
     operatingProfit(s) >= CONFIG.targets.operatingProfit && satisfactionSoFar(s) >= CONFIG.targets.satisfaction && wellbeing(s) >= CONFIG.targets.wellbeing;
 
   it('sensible play wins the curated Saturday', () => {
-    const { state } = playShift(SEED, sensible);
+    const state = playShiftLive(SEED, sensible);
     expect(won(state)).toBe(true);
     expect(summarise(state).won).toBe(true);
   });
   it('sensible play wins most generated Saturdays', () => {
     let wins = 0;
     const seeds = Array.from({ length: 20 }, (_, i) => 100 + i * 37);
-    for (const seed of seeds) if (won(playShift(seed, sensible).state)) wins++;
+    for (const seed of seeds) if (won(playShiftLive(seed, sensible))) wins++;
     expect(wins).toBeGreaterThanOrEqual(12);
   });
   it('neglecting breaks wrecks wellbeing', () => {
@@ -570,7 +570,7 @@ describe('balance: complete shifts', () => {
       }
       return p;
     };
-    const { state } = playShift(SEED, slip);
+    const state = playShiftLive(SEED, slip);
     expect(won(state)).toBe(true);
   });
 });

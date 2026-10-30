@@ -39,6 +39,61 @@ export const CONFIG = {
     autosaveSeconds: 5,
   },
 
+  /**
+   * Life on the shop floor, on top of the hourly forecast: short bursts of
+   * shoppers, small jobs that need a person for a few minutes, and the odd
+   * question that pauses the day. Seeded per day, so a saved day replays
+   * exactly. Aim: a decision worth making every 30–60 real seconds at 1x
+   * (one in-game hour = one real minute). See `npm run pacing`.
+   */
+  floor: {
+    bursts: {
+      /** Expected bursts per trading hour, scaled by how busy the hour is relative to `busyAt` customers. */
+      perHour: 0.6,
+      busyAt: 40,
+      maxPerHour: 1,
+      minGapMinutes: 30,
+      /** Announced at the door this many minutes before the first shopper arrives (about 4 real seconds at 1x). */
+      warnMinutes: 4,
+      /** Shoppers arrive over this many minutes. */
+      minutes: [6, 10] as [number, number],
+      /** Extra shoppers as a share of the hour's forecast, at least `minShoppers`. */
+      share: [0.12, 0.2] as [number, number],
+      minShoppers: 6,
+    },
+    tasks: {
+      /** Expected new jobs per trading hour: a base plus a share per forecast customer. */
+      perHour: 0.45,
+      perCustomer: 0.008,
+      minGapMinutes: 6,
+      /** The first job of the day appears within this many minutes of opening, so there's something to do from the start. */
+      firstWithinMinutes: 15,
+      /** Never more than this many open at once (new ones wait). */
+      maxOpen: 3,
+      /** Satisfaction lost each minute, per open job nobody is on, capped in total. */
+      maxPenalty: 12,
+      kinds: {
+        spill: { label: 'Spill to mop', short: 'Spill', where: ['produce', 'chilled', 'ambient'], work: 3, expires: null, penalty: 5, weight: 3 },
+        help: { label: 'Shopper needs help finding something', short: 'Help', where: ['produce', 'chilled', 'ambient'], work: 2, expires: 12, penalty: 4, weight: 3 },
+        priceCheck: { label: 'Price check at the till', short: 'Price check', where: ['tills'], work: 1, expires: 8, penalty: 6, weight: 2 },
+        pallet: { label: 'Cage blocking the aisle', short: 'Cage in aisle', where: ['ambient', 'chilled', 'produce'], work: 2, expires: null, penalty: 4, weight: 2 },
+        baskets: { label: 'Baskets running out at the door', short: 'Baskets', where: ['entrance'], work: 1, expires: null, penalty: 4, weight: 2 },
+      } satisfies Record<string, TaskKindConfig>,
+    },
+    /** Questions that pause the day. Kinds and their numbers; at most `maxPerDay`. */
+    events: {
+      perHour: 0.4,
+      maxPerDay: 3,
+      minGapMinutes: 50,
+      firstAfterMinutes: 20,
+      breakRequest: { minutes: 10, refusedStrain: 4, grantedStrainRelief: 2 },
+      favour: { cost: 3, mood: 3, refusedMood: -2, moodMinutes: 60 },
+      nearDate: { qty: 100, costShare: 0.5, days: 1 },
+      complaint: { voucher: 5, voucherMood: 3, apologyMood: 1, brushOffMood: -3, moodMinutes: 45 },
+      donation: { cost: 20, mood: 3, moodMinutes: 180 },
+    },
+  },
+
   /** Sound and the little coin pops when a till takes money. */
   juice: {
     /** Volume of the till ding, 0–1 (gentle). */
@@ -321,8 +376,11 @@ export const CONFIG = {
       pricing: 2,
       actions: { emergency: 1, markdown: 2, promotion: 2, temp: 3, repair: 3 },
     },
-    /** The first days are gentler: shoppers wait this many extra minutes before giving up. */
-    generous: { days: 3, patienceBonusMinutes: 3 },
+    /**
+     * The first days forgive mistakes rather than lowering the activity: shoppers wait longer before giving up,
+     * unattended floor jobs and brush-offs cost half the satisfaction, and a poor day moves reputation down half as far.
+     */
+    generous: { days: 3, patienceBonusMinutes: 2, penaltyScale: 0.5, reputationDropScale: 0.5 },
     /** Word gets round: each completed week brings this many more shoppers, up to `maxGrowth`. */
     weeklyGrowth: 0.05,
     maxGrowth: 0.3,
@@ -339,15 +397,18 @@ export const CONFIG = {
     startTills: 2,
     /** Stock in the shop on Sunday morning. `days`: days it still keeps (null: keeps). */
     startStock: {
-      produce: [{ qty: 150, days: 1, where: 'shelf' }],
+      produce: [
+        { qty: 120, days: 1, where: 'shelf' },
+        { qty: 120, days: 2, where: 'backroom' },
+      ],
       chilled: [],
       ambient: [
-        { qty: 380, days: null, where: 'shelf' },
-        { qty: 220, days: null, where: 'backroom' },
+        { qty: 200, days: null, where: 'shelf' },
+        { qty: 400, days: null, where: 'backroom' },
       ],
     } as Record<DeptId, { qty: number; days: number | null; where: 'shelf' | 'backroom' }[]>,
-    /** A modest shop: two-thirds of the Saturday shelving until it is extended. */
-    shelf: { produce: 200, chilled: 130, ambient: 400 } as Record<DeptId, number>,
+    /** A modest shop with small displays: they hold roughly an hour or two of trade, so they need topping up from the stockroom during the day. */
+    shelf: { produce: 140, chilled: 100, ambient: 220 } as Record<DeptId, number>,
     backroom: { produce: 400, chilled: 300, ambient: 800 } as Record<DeptId, number>,
     /** Day costs: rent and rates per day, energy and the like per trading hour. */
     rentPerDay: 90,
@@ -365,7 +426,7 @@ export const CONFIG = {
       {
         name: 'Sunday',
         hours: 4,
-        forecast: [16, 24, 28, 22],
+        forecast: [22, 34, 42, 30],
         middayHour: null,
         intro: 'First day in charge. Keep a till open, keep the shelves filled from the stockroom, and give everyone a break. There’s no rush: pause whenever you like.',
         later: 'Sunday: short hours and a calm start to the week.',
@@ -374,7 +435,7 @@ export const CONFIG = {
       {
         name: 'Monday',
         hours: 5,
-        forecast: [20, 28, 34, 32, 24],
+        forecast: [24, 32, 38, 36, 28],
         middayHour: 2,
         intro: 'New today: a midday delivery arrives at 11:00. Someone has to unload it on the dock before the shelves can be filled from it.',
         later: 'Monday: a quiet one, with the midday lorry at 11:00.',
@@ -383,7 +444,7 @@ export const CONFIG = {
       {
         name: 'Tuesday',
         hours: 6,
-        forecast: [22, 30, 38, 40, 32, 26],
+        forecast: [26, 34, 42, 44, 36, 30],
         middayHour: 3,
         intro: 'New today: you can set each department’s price. Click a department, then Change prices.',
         later: 'Tuesday: an ordinary day. A good one for trying a new price.',
@@ -460,6 +521,22 @@ export interface CampaignDayConfig {
   later: string;
   events: { kind: 'rush' | 'delayedDelivery' | 'fridgeFault'; hour: number; warnAt: number }[];
 }
+
+export interface TaskKindConfig {
+  label: string;
+  short: string;
+  /** Where it can appear: departments, the tills or the entrance. */
+  where: TaskPlace[];
+  /** Minutes of one person's work. */
+  work: number;
+  /** Minutes before it goes away by itself (the shopper gives up), or null. */
+  expires: number | null;
+  /** Satisfaction points lost each minute while nobody is on it. */
+  penalty: number;
+  weight: number;
+}
+
+export type TaskPlace = DeptId | 'tills' | 'entrance';
 
 export interface DeptConfig {
   name: string;

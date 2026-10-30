@@ -1,4 +1,4 @@
-import type { ChilledLife, DeptId, PriceTier } from './config';
+import type { ChilledLife, DeptId, PriceTier, TaskPlace } from './config';
 
 /** A quantity of one aggregate product with one cost and one date. */
 export interface Batch {
@@ -22,7 +22,9 @@ export type AssignmentId =
   | 'replenish:chilled'
   | 'replenish:ambient'
   | 'receive'
-  | 'break';
+  | 'break'
+  /** On a floor job (which one is on the job itself). Not offered as a standing job. */
+  | 'task';
 
 export const ASSIGNMENTS: readonly AssignmentId[] = [
   'tills',
@@ -172,6 +174,8 @@ export interface DayContext {
   pricing: boolean;
   /** Extra minutes of queue patience (the generous first days). */
   patienceBonus?: number;
+  /** Scales satisfaction penalties from floor jobs and answers (the generous first days). */
+  penaltyScale?: number;
 }
 
 export interface SimState {
@@ -203,6 +207,64 @@ export interface SimState {
   idCounter: number;
   /** Owed to the wholesaler for stock bought on account; repaid from takings. */
   credit?: number;
+  /** Life on the shop floor: bursts, small jobs and questions (live play). */
+  floor?: Floor;
+}
+
+export type TaskKind = 'spill' | 'help' | 'priceCheck' | 'pallet' | 'baskets';
+export type FloorEventKind = 'breakRequest' | 'favour' | 'nearDate' | 'complaint' | 'donation';
+
+/** A short spike of shoppers on top of the hour's forecast. Times are steps since opening. */
+export interface Burst {
+  id: string;
+  kind: 'bus' | 'school' | 'church' | 'lunch' | 'coach';
+  at: number;
+  minutes: number;
+  shoppers: number;
+  warnAt: number;
+}
+
+/** A small job on the shop floor that needs one person for a few minutes. */
+export interface FloorTask {
+  id: string;
+  kind: TaskKind;
+  place: TaskPlace;
+  /** Which of the place's spots it appears on. */
+  spot: number;
+  at: number;
+  /** Minutes of work needed, and done so far. */
+  work: number;
+  progress: number;
+  assigned: string | null;
+  /** Step at which it goes away by itself if nobody has come. */
+  expiresAt: number | null;
+}
+
+export interface FloorEvent {
+  id: string;
+  kind: FloorEventKind;
+  at: number;
+  /** Filled in when it is raised: who or what it is about. */
+  staffId?: string;
+  dept?: DeptId;
+  reason?: string;
+}
+
+export interface Floor {
+  bursts: Burst[];
+  /** Jobs still to appear, in time order. */
+  schedule: FloorTask[];
+  /** Jobs on the floor now. */
+  tasks: FloorTask[];
+  /** Questions still to come, in time order. */
+  events: FloorEvent[];
+  /** A question waiting for an answer (the day doesn't move on until it's answered). */
+  pending: FloorEvent | null;
+  /** Satisfaction changes from answers, until a step. */
+  mood: { delta: number; until: number; label: string }[];
+  counts: { resolved: number; expired: number; answered: number };
+  /** What the last answer did, in a line. */
+  lastAnswer?: string;
 }
 
 export interface StepSnapshot {

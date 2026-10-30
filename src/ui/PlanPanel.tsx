@@ -150,8 +150,8 @@ function AttentionPanel({ state, plan, onOpen, onClose, onOutlook }: { state: Si
         <p className="idle-hint">Nothing needs attention with this plan.</p>
       ) : (
         <ul className="attention-list">
-          {items.map((p) => (
-            <li key={p.title}>
+          {items.map((p, i) => (
+            <li key={`${i}-${p.title}`}>
               <button type="button" className={`attention-item ${p.level}`} onClick={() => onOpen(p.zone)}>
                 <span className="att-mark" aria-hidden="true">
                   !

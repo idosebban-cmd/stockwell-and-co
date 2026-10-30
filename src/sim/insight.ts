@@ -7,6 +7,7 @@
  * (no hidden variation, no unannounced events), so it is an estimate, never
  * a promise. Outcomes read recorded results only.
  */
+import { BURST_TEXT, burstAtDoor, taskLabel } from './floor';
 import { CONFIG, DEPTS, PRICE_TIERS, deptName, type DeptId, type PriceTier } from './config';
 import {
   actionKey,
@@ -43,6 +44,7 @@ export const JOB_ZONE: Record<AssignmentId, Zone> = {
   'replenish:ambient': 'ambient',
   receive: 'dock',
   break: 'break',
+  task: 'ambient',
 };
 
 export function remainingSteps(state: SimState): number {
@@ -83,6 +85,9 @@ export function jobPreview(state: SimState, plan: HourPlan, staffId: string, job
     if (s.energy >= 100) blocked = 'Already fully rested';
   } else if (job === 'tills') {
     y = `~${Math.round(rate)} customers/h`;
+  } else if (job === 'task') {
+    const t = state.floor?.tasks.find((x) => x.assigned === staffId);
+    y = t ? `${taskLabel(t)} · ${Math.max(0, Math.ceil(t.work - t.progress))} min left` : 'Floor job';
   } else if (job === 'receive') {
     y = `~${Math.round(rate)} items/h`;
     const dock = DEPTS.filter((d) => deptUnits(state, d).dock > 0);
@@ -282,6 +287,8 @@ export interface Problem {
   zone: Zone;
   level: 'urgent' | 'warn';
   title: string;
+  /** Floor jobs and bursts have their own markers in the shop. */
+  floor?: boolean;
 }
 
 export function problems(state: SimState, plan: HourPlan, look: Outlook | null = outlook(state, plan)): Problem[] {
@@ -296,6 +303,13 @@ export function problems(state: SimState, plan: HourPlan, look: Outlook | null =
     if (row.status === 'short') out.push({ zone: row.zone, level: 'warn', title: row.zone === 'tills' ? 'Queue likely to overflow' : `${row.label} likely to run short` });
   }
   if (look?.tired.length) out.push({ zone: 'break', level: 'warn', title: `Tired: ${look.tired.map((t) => t.name).join(', ')}` });
+  const door = burstAtDoor(state.floor, state.hour * STEPS + (state.step ?? 0));
+  if (door && door.inMinutes > 0) out.push({ zone: 'tills', level: 'urgent', title: `${BURST_TEXT[door.burst.kind].cue}: about ${door.burst.shoppers} shoppers in ${door.inMinutes} min`, floor: true });
+  for (const t of state.floor?.tasks ?? []) {
+    if (t.assigned) continue;
+    const where: Zone = t.place === 'entrance' ? 'tills' : t.place;
+    out.push({ zone: where, level: 'warn', title: `${taskLabel(t)} · drag someone onto the “!”`, floor: true });
+  }
   return out;
 }
 

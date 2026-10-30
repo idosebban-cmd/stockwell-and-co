@@ -131,7 +131,9 @@ function isOldRecord(r: unknown): r is { seed: number; setup: SetupPlan | null; 
 function isChoice(c: unknown): c is Choice {
   const x = c as Choice;
   if (!x || typeof x !== 'object' || typeof x.at !== 'number') return false;
-  if (x.kind === 'jobs') return !!x.assignments && Object.values(x.assignments).every((a) => ASSIGNMENTS.includes(a));
+  if (x.kind === 'jobs') return !!x.assignments && Object.values(x.assignments).every((a) => ASSIGNMENTS.includes(a) || a === 'task');
+  if (x.kind === 'task') return typeof x.staffId === 'string' && typeof x.taskId === 'string';
+  if (x.kind === 'answer') return typeof x.eventId === 'string' && typeof x.option === 'number';
   if (x.kind === 'prices') return DEPTS.every((d) => PRICE_TIERS.includes(x.pricing?.[d]));
   if (x.kind === 'action') return !!x.action && typeof x.action.kind === 'string';
   return false;

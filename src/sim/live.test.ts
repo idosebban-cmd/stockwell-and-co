@@ -1,32 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG } from './config';
 import { recommendedSetup, startDay } from './engine';
-import { advance, choose, choicesFor, isClosed, moveStaff, replayLive, startLive, stepOf, type Choice } from './live';
+import { advanceAnswering, choose, choicesFor, isClosed, moveStaff, replayLive, startLive, stepOf, type Choice } from './live';
 
 const open = () => startLive(startDay(1, recommendedSetup()));
 
 describe('live play', () => {
   it('runs minute by minute and closes at the end of the day', () => {
     let live = open();
-    live = advance(live, 7).live;
+    live = advanceAnswering(live, 7);
     expect(stepOf(live.state)).toBe(7);
-    live = advance(live, 10_000).live;
+    live = advanceAnswering(live, 10_000);
     expect(isClosed(live)).toBe(true);
   });
   it('a break ends by itself after half an hour, back to the job the person left, and counts as a break', () => {
     let live = open();
     const job = live.plan.assignments.kwame;
     live = choose(live, { at: 0, kind: 'jobs', assignments: { ...live.plan.assignments, kwame: 'break' } });
-    live = advance(live, CONFIG.live.breakMinutes - 1).live;
+    live = advanceAnswering(live, CONFIG.live.breakMinutes - 1);
     expect(live.plan.assignments.kwame).toBe('break');
-    live = advance(live, 1).live;
+    live = advanceAnswering(live, 1);
     expect(live.plan.assignments.kwame).toBe(job);
     expect(live.state.staff.find((s) => s.id === 'kwame')!.breaks).toBe(1);
   });
   it('a break that crosses the hour still counts', () => {
-    let live = advance(open(), 45).live;
+    let live = advanceAnswering(open(), 45);
     live = choose(live, { at: 45, kind: 'jobs', assignments: { ...live.plan.assignments, mags: 'break' } });
-    live = advance(live, 40).live;
+    live = advanceAnswering(live, 40);
     const mags = live.state.staff.find((s) => s.id === 'mags')!;
     expect(mags.breaks).toBe(1);
     expect(mags.consecutive).toBe(0);
@@ -41,7 +41,7 @@ describe('live play', () => {
     expect(next[there[0]]).toBe(live.plan.assignments.kwame);
   });
   it('actions happen at once, even while paused, and only once', () => {
-    let live = advance(open(), 30).live;
+    let live = advanceAnswering(open(), 30);
     const cash = live.state.cash;
     live = choose(live, { at: 30, kind: 'action', action: { kind: 'promotion', dept: 'produce' } });
     expect(live.state.cash).toBeCloseTo(cash - CONFIG.actions.promotion.cost, 9);
@@ -57,11 +57,11 @@ describe('live play', () => {
         choices.push(x);
       }
     };
-    live = advance(live, 12).live;
+    live = advanceAnswering(live, 12, choices);
     make(choicesFor(live, { ...live.plan, assignments: { ...live.plan.assignments, bev: 'break' } }));
-    live = advance(live, 70).live;
+    live = advanceAnswering(live, 70, choices);
     make(choicesFor(live, { ...live.plan, pricing: { ...live.plan.pricing, ambient: 'low' }, actions: [{ kind: 'promotion', dept: 'chilled' }] }));
-    live = advance(live, 33).live;
+    live = advanceAnswering(live, 33, choices);
     const again = replayLive(startDay(1, recommendedSetup()), JSON.parse(JSON.stringify(choices)), stepOf(live.state));
     expect(stepOf(again.state)).toBe(stepOf(live.state));
     expect(again.state.cash).toBeCloseTo(live.state.cash, 9);

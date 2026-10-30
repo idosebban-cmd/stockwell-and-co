@@ -1,3 +1,4 @@
+import { emptyFloor } from './floor';
 import { describe, expect, it } from 'vitest';
 import { CONFIG, DEPTS } from './config';
 import { defaultPlan, deptUnits, recommendedSetup, runHour, startDay } from './engine';
@@ -167,6 +168,7 @@ describe('pricing economics', () => {
   it('no price wins every situation', () => {
     // Ordinary day: the regular price earns most on fruit & veg over the remaining day.
     let s = startDay(1, recommendedSetup());
+    s.floor = emptyFloor();
     while (s.hour < 2) s = runHour(s, sensible(s)).state;
     const day = priceOptions(s, sensible(s), 'produce');
     const best = (os: typeof day) => [...os].sort((a, b) => after(b) - after(a))[0].tier;
