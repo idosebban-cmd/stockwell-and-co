@@ -14,7 +14,7 @@ import { GameTools } from './ui/ActionTools';
 import { Setup } from './ui/Setup';
 import { Opening } from './ui/Opening';
 import { Closing } from './ui/Closing';
-import { closingPicture, dayKicker, FailedWeek, MorningScreen, Offers, ValueLines, WeekResult } from './ui/CampaignScreens';
+import { FailedWeek, Investments, MorningScreen, ValueLines, WeekResult } from './ui/CampaignScreens';
 import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen, type PrimaryAction } from './ui/ShopScreen';
 import { LessonPanel, lessonPrimary, useTutorial } from './ui/Tutorial';
@@ -202,7 +202,7 @@ function WeekView({
     return (
       <>
         {bar(null)}
-        <WeekResult camp={rb.camp} picture={null} onNewWeek={() => week.newWeek()} onQuick={onQuick} />
+        <WeekResult camp={rb.camp} onNewWeek={() => week.newWeek()} onQuick={onQuick} />
       </>
     );
   if (view === 'closed' && state) {
@@ -214,12 +214,12 @@ function WeekView({
         <Closing
           key={`close-${day}`}
           state={state}
-          picture={closingPicture(state, rb.camp)}
+          title={`${weekdayName(day)} complete`}
+          kicker={`Day ${day + 1} of ${CAMPAIGN_DAYS}`}
+          cash={rb.camp.cash}
           targets={{ profit: dayConfig(day).profitTarget, satisfaction: K.objective.reputation, wellbeing: K.objective.wellbeing }}
-          kicker={dayKicker(day)}
           primary={{ label: last ? 'See the week ▶' : `Next day: ${weekdayName(day + 1)} ▶`, onClick: week.continueDay }}
-          others={[{ label: `Restart ${weekdayName(day)}`, onClick: week.restart }]}
-          extra={last ? undefined : <Offers camp={rb.camp} closed={state} bought={week.pending} onBuy={(id: UpgradeId) => week.purchase(id)} onUndo={week.undoPurchase} />}
+          extra={last ? undefined : <Investments camp={rb.camp} closed={state} bought={week.pending} onBuy={(id: UpgradeId) => week.purchase(id)} onUndo={week.undoPurchase} />}
           accountsExtra={<ValueLines camp={rb.camp} />}
         />
       </>
@@ -335,12 +335,9 @@ function QuickView({ game, reduced, bar, onHome }: { game: Game; reduced: boolea
           <Closing
             state={game.state}
             targets={QUICK_TARGETS}
-            kicker={`Saturday · Quick play${game.record.seed === 1 ? '' : ` · seed ${game.record.seed}`}`}
+            title="Saturday complete"
+            kicker={`Quick play${game.record.seed === 1 ? '' : ` · seed ${game.record.seed}`}`}
             primary={{ label: 'Try again ▶', onClick: () => { game.retrySameSaturday(); game.confirmSetup(recommendedSetup()); } }}
-            others={[
-              { label: 'New Saturday', onClick: () => { game.newSaturday(); game.confirmSetup(recommendedSetup()); } },
-              { label: 'Home', onClick: onHome },
-            ]}
           />
         </>
       );

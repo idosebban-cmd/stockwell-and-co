@@ -61,11 +61,13 @@ interface Props {
   summaryOnPlan?: boolean;
   /** False shows the shop without letting the player select or move anyone (before opening, between days). */
   interactive?: boolean;
+  /** Labels to show beside places in the shop (the morning briefing's stock labels). */
+  notices?: ShopNotice[];
 }
 
 const STEP_MS = { normal: 800, fast: 380 };
 
-export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true }: Props) {
+export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onReplayDone, reduced, replaySpeed, steps, panel, primary, tools, focus, summaryOnPlan, interactive = true, notices }: Props) {
   const [sel, setSelState] = useState<Selection>(null);
   const [toast, setToast] = useState<{ text: string; warn?: boolean } | null>(null);
   const [step, setStep] = useState(0);
@@ -164,7 +166,8 @@ export function ShopScreen({ state, plan, setPlan, phase, report, onRun, onRepla
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, onRun]);
 
-  const built = useMemo(() => buildView(state, phase, report, step, plan, summary), [state, phase, report, step, plan, summary]);
+  const built0 = useMemo(() => buildView(state, phase, report, step, plan, summary), [state, phase, report, step, plan, summary]);
+  const built = notices ? { ...built0, view: { ...built0.view, notices } } : built0;
 
   const jobHints = useMemo(() => {
     if (phase !== 'plan' || !selectedId || !plan) return undefined;

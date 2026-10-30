@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { CONFIG, deptName, hourLabel } from '../sim/config';
+import { CONFIG, deptName } from '../sim/config';
 import { money } from '../sim/engine';
 import { summarise, type ScoreTargets, type Summary } from '../sim/summary';
 import type { SimState } from '../sim/types';
 import { Forecast } from './Forecast';
-import { ShopPicture } from './ShopScreen';
+import { ResultIcon } from './Illustrations';
 
 interface Action {
   label: string;
@@ -14,8 +14,12 @@ interface Action {
 interface Props {
   state: SimState;
   targets: ScoreTargets;
-  /** e.g. "Saturday · Quick play". */
+  /** e.g. "Sunday complete". */
+  title: string;
+  /** e.g. "Day 1 of 7". */
   kicker: string;
+  /** Cash shown beside the main action (the week). */
+  cash?: number;
   primary: Action;
   /** Quieter actions (New Saturday, Restart day). */
   others?: Action[];
@@ -23,48 +27,43 @@ interface Props {
   extra?: ReactNode;
   /** Campaign: business value lines for the Accounts tab. */
   accountsExtra?: ReactNode;
-  /** The shop to draw (defaults to the closed shift). */
-  picture?: SimState;
 }
 
 type Tab = 'accounts' | 'operations' | 'team';
 
 /** Closing time: a compact result first, the full report on request. */
-export function Closing({ state, targets, kicker, primary, others = [], extra, accountsExtra, picture }: Props) {
+export function Closing({ state, targets, title, kicker, cash, primary, others = [], extra, accountsExtra }: Props) {
   const s = summarise(state, targets);
   const [report, setReport] = useState(false);
   const [tab, setTab] = useState<Tab>('accounts');
   return (
     <main className="result" id="main">
       <section className="result-card" aria-labelledby="result-h">
-        <div className="result-head">
-          <ShopPicture state={picture ?? state} label={`The shop at closing time, ${hourLabel(state.ctx.hours)}`} />
+        <div className="result-top">
           <div>
             <p className="panel-kicker">{kicker}</p>
-            <h1 id="result-h">Shift complete</h1>
-            <p className="result-outcome">
-              {s.metCount} of {s.scores.length} targets met
-            </p>
+            <h1 id="result-h">{title}</h1>
           </div>
+          <ul className="indicators" aria-label={`${s.metCount} of ${s.scores.length} targets met`}>
+            {s.scores.map((x) => (
+              <li key={x.key} className={x.met ? 'met' : 'missed'}>
+                <ResultIcon kind={x.key} />
+                <span className="ind-text">
+                  <span className="ind-label">{x.key === 'customers' ? 'Customer satisfaction' : x.key === 'staff' ? 'Staff wellbeing' : 'Profit'}</span>
+                  <span className="ind-value">{x.display}</span>
+                  <span className="ind-target">
+                    <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> target {x.targetDisplay}
+                    <span className="sr-only">{x.met ? ', met' : ', missed'}</span>
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
-
-        <ul className="scores" aria-label="Scores">
-          {s.scores.map((x) => (
-            <li key={x.key} className={`score ${x.met ? 'met' : 'missed'}`}>
-              <span className="score-label">{x.label}</span>
-              <span className="score-value">
-                {x.display} <span className="score-target">/ {x.targetDisplay}</span>
-              </span>
-              <span className="score-mark">
-                <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> {x.met ? 'Met' : 'Missed'}
-              </span>
-            </li>
-          ))}
-        </ul>
 
         {!report && (
           <>
-            <p className="takeaway">{s.takeaway}</p>
+            {s.takeaway && <p className="takeaway">{s.takeaway}</p>}
             {extra}
           </>
         )}
@@ -72,6 +71,11 @@ export function Closing({ state, targets, kicker, primary, others = [], extra, a
         {report && <Report s={s} state={state} tab={tab} setTab={setTab} accountsExtra={accountsExtra} />}
 
         <div className="result-actions">
+          {cash !== undefined && (
+            <span className="result-cash">
+              Cash <strong>{money(cash)}</strong>
+            </span>
+          )}
           <button type="button" className="btn-primary btn-run" onClick={primary.onClick} autoFocus>
             {primary.label}
           </button>

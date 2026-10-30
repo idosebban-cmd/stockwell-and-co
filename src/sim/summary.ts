@@ -284,7 +284,7 @@ function takeaway(state: SimState, s: Summary): string {
     return `Profit was ${money(shortfall)} short of the target, with no single cause large enough to explain it. The report has the breakdown.`;
   }
   if (s.missed.length) return s.missed[0];
-  return 'No major problems in the recorded results.';
+  return '';
 }
 
 // ---------------------------------------------------------------------------

@@ -24,8 +24,10 @@ import {
   type UpgradeId,
 } from '../sim/campaign';
 import type { SetupPlan, SimState } from '../sim/types';
-import { PanelHead } from './PlanPanel';
-import { ShopPicture, ShopScreen } from './ShopScreen';
+import { ShopScreen } from './ShopScreen';
+import { Clock, CueArt, EquipArt, Person, ResultIcon, SPECIALITY_LABEL, SpecialitySymbol, type CueId, type EquipId } from './Illustrations';
+import { SPECIALITY_TEXT } from '../sim/roster';
+import type { ShopNotice, ZoneId } from './Store';
 
 const K = CONFIG.campaign;
 
@@ -43,10 +45,34 @@ const EMPTY_ORDER = (camp: CampaignState): SetupPlan => ({
   pricing: { ...camp.pricing },
 });
 
-/** The shop before opening, with the day's forecast and the recommended order to confirm. */
+interface Cue {
+  id: CueId;
+  label: string;
+  zones: ZoneId[];
+  text: string;
+}
+
+/** Three things worth knowing today, as pictures: they point at places in the shop and assign nobody. */
+function cuesFor(camp: CampaignState, ctx: ReturnType<typeof dayContext>): Cue[] {
+  const all: Record<CueId, Cue> = {
+    serve: { id: 'serve', label: 'Serve', zones: ['tills'], text: `Each open till serves about ${CONFIG.checkout.customersPerHour} customers an hour. Waits over ${CONFIG.checkout.patienceMinutes} minutes start losing shoppers.` },
+    restock: { id: 'restock', label: 'Restock', zones: ctx.depts.filter((d) => d !== 'chilled'), text: 'Shoppers only buy what is on the shelf. Whoever fills a department moves stock out from the stockroom.' },
+    rest: { id: 'rest', label: 'Rest', zones: ['break'], text: 'Energy falls while working. Half an hour in the break room restores it; tired people work slower.' },
+    unload: { id: 'unload', label: 'Unload', zones: ['dock'], text: `The midday lorry${ctx.middayHour !== null ? ` (${hourLabel(ctx.middayHour)})` : ''} leaves stock on the dock. Someone must unload it before shelves can be filled from it.` },
+    prices: { id: 'prices', label: 'Prices', zones: ctx.depts, text: 'During the day, click a department, then Change prices, to compare Low, Regular and High.' },
+    chilled: { id: 'chilled', label: 'Chilled', zones: ['chilled'], text: 'Chilled needs filling like any shelf, and spoils quickly if left on the dock.' },
+  };
+  const ids: CueId[] =
+    camp.day === 1 ? ['unload', 'restock', 'rest'] : camp.day === 2 ? ['prices', 'serve', 'rest'] : ctx.depts.includes('chilled') ? ['serve', 'chilled', 'rest'] : ['serve', 'restock', 'rest'];
+  return ids.map((x) => all[x]);
+}
+
+/** The shop before opening, with an illustrated briefing: when, how busy, what stock arrives, what it costs, today's goal. */
 export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; onOpen: (s: SetupPlan) => void; reduced: boolean }) {
   const [order, setOrder] = useState<SetupPlan>(() => recommendOrder(camp));
   const [adjust, setAdjust] = useState(false);
+  const [cue, setCue] = useState<CueId | null>(null);
+  const [orderInfo, setOrderInfo] = useState(false);
   const ctx = dayContext(camp);
   const sc = useMemo(() => dayScenario(camp), [camp]);
   const have = carriedQty(camp);
@@ -61,11 +87,19 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
   const plan = useMemo(() => defaultPlan(preview), [preview]);
   const cfg = dayConfig(camp.day);
   const after = camp.cash - check.cost;
-  const goal = campaignGoal(camp);
   const set = (d: DeptId, k: 'morning' | 'midday', v: number) => setOrder((o) => ({ ...o, orders: { ...o.orders, [d]: { ...o.orders[d], [k]: Math.max(0, Math.round(v)) } } }));
   const setLife = (k: 'morning' | 'midday', l: ChilledLife) => setOrder((o) => ({ ...o, chilledLife: { ...o.chilledLife, [k]: l } }));
-  const customers = sc.forecast.reduce((t, x) => t + x, 0);
-  const peak = Math.max(...sc.forecast);
+  const cues = cuesFor(camp, ctx);
+  const active = cues.find((c) => c.id === cue) ?? null;
+
+  // Stock labels beside the shelves, and the midday lorry by the dock.
+  const notices: ShopNotice[] = ctx.depts.map((d) => {
+    const n = order.orders[d].morning;
+    return n > 0 ? { zone: d, text: `+${n} arriving`, tone: 'good' as const } : { zone: d, text: `${Math.round(have[d])} in stock · No order`, tone: 'info' as const };
+  });
+  const midday = ctx.depts.reduce((t, d) => t + order.orders[d].midday, 0);
+  if (ctx.middayHour !== null && midday > 0) notices.push({ zone: 'dock', text: `Lorry ${hourLabel(ctx.middayHour)} · +${midday}`, tone: 'info' });
+
   return (
     <ShopScreen
       state={preview}
@@ -79,93 +113,166 @@ export function MorningScreen({ camp, onOpen, reduced }: { camp: CampaignState; 
       replaySpeed="normal"
       steps={6}
       interactive={false}
+      focus={active ? { staff: [], zones: active.zones } : undefined}
+      notices={notices}
       primary={{
-        label: 'Open the shop ▶',
+        label: 'Confirm order & open ▶',
         onClick: () => onOpen(order),
         disabled: check.errors.length > 0,
-        note: check.errors[0] ?? (after < 0 ? `Uses ${money(-after)} of the overdraft` : undefined),
+        note: check.errors[0] ?? `Buys this order for ${money(check.cost)} and starts trading${after < 0 ? ` (uses ${money(-after)} of the overdraft)` : ''}`,
         noteTone: check.errors.length ? 'bad' : undefined,
       }}
       panel={() => (
-        <div className="panel-inner morning">
-          <PanelHead title="Before opening" kicker={dayKicker(camp.day)} />
-          <p className="morning-line">
-            Open {hourLabel(0)}–{hourLabel(cfg.hours)} · about {customers} customers, busiest {hourLabel(sc.forecast.indexOf(peak))}
-          </p>
+        <div className="panel-inner briefing">
+          <h2 className="sr-only">Before opening: {weekdayName(camp.day)}</h2>
+          <DayMarkers day={camp.day} />
+          <div className="brief-row">
+            <Clock hour={9} />
+            <strong className="brief-hours">
+              {hourLabel(0)}–{hourLabel(cfg.hours)}
+            </strong>
+            <span className="today-badge">Today: {pounds(cfg.profitTarget)} profit</span>
+          </div>
           <MiniForecast forecast={sc.forecast} />
-          <p className="morning-goal">
-            Today’s goal: <strong>{pounds(cfg.profitTarget)} profit</strong>
-          </p>
-          <p className="morning-intro">{cfg.intro}</p>
-          {sc.events.some((e) => e.kind === 'fridgeFault') && <p className="morning-intro">The chiller compressor is rattling. The engineer is on call if it gives up.</p>}
 
-          <div className="order">
-            <div className="order-head">
-              <strong>Stock order</strong>
-              <button type="button" className="btn-link" aria-expanded={adjust} onClick={() => setAdjust((a) => !a)}>
-                {adjust ? 'Done' : 'Adjust'}
-              </button>
-            </div>
-            <ul className="order-list">
-              {ctx.depts.map((d) => (
-                <li key={d}>
-                  <span className="ol-dept">{deptName(d)}</span>
-                  {adjust ? (
+          {adjust ? (
+            <div className="order-edit">
+              <p className="brief-sub">Adjust order</p>
+              <ul className="order-list">
+                {ctx.depts.map((d) => (
+                  <li key={d}>
+                    <span className="ol-dept">{deptName(d)}</span>
                     <span className="ol-edit">
                       <Qty label={`${deptName(d)} morning delivery`} value={order.orders[d].morning} onChange={(v) => set(d, 'morning', v)} />
                       {ctx.middayHour !== null && (
                         <>
-                          <span className="muted">+ {hourLabel(ctx.middayHour)}</span>
+                          <span className="muted">{hourLabel(ctx.middayHour)}</span>
                           <Qty label={`${deptName(d)} midday delivery`} value={order.orders[d].midday} onChange={(v) => set(d, 'midday', v)} />
                         </>
                       )}
                     </span>
-                  ) : (
-                    <span>
-                      {order.orders[d].morning + order.orders[d].midday === 0
-                        ? `None (${Math.round(have[d])} in stock)`
-                        : `${order.orders[d].morning} now${order.orders[d].midday ? ` + ${order.orders[d].midday} at ${hourLabel(ctx.middayHour!)}` : ''}`}
-                    </span>
-                  )}
-                  {adjust && d === 'chilled' && (
-                    <span className="ol-life">
-                      {(['morning', 'midday'] as const)
-                        .filter((k) => k === 'morning' || ctx.middayHour !== null)
-                        .map((k) => (
-                          <label key={k}>
-                            {k === 'morning' ? 'Morning' : 'Midday'}:{' '}
-                            <select value={order.chilledLife[k]} onChange={(e) => setLife(k, e.target.value as ChilledLife)}>
-                              <option value="short">Use by today · {money(deliveryUnitCost('chilled', 'short'))}</option>
-                              <option value="long">Keeps 3 days · {money(deliveryUnitCost('chilled', 'long'))}</option>
-                            </select>
-                          </label>
-                        ))}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <p className="order-total">
-              Cost <strong>{money(check.cost)}</strong> · cash after <strong className={after < 0 ? 'bad' : ''}>{money(after)}</strong>
-            </p>
-            {adjust && (
-              <button type="button" className="btn-link" onClick={() => setOrder(recommendOrder(camp))}>
-                Back to the recommended order
+                    {d === 'chilled' && (
+                      <span className="ol-life">
+                        {(['morning', 'midday'] as const)
+                          .filter((k) => k === 'morning' || ctx.middayHour !== null)
+                          .map((k) => (
+                            <label key={k}>
+                              {k === 'morning' ? 'Morning' : 'Midday'}:{' '}
+                              <select value={order.chilledLife[k]} onChange={(e) => setLife(k, e.target.value as ChilledLife)}>
+                                <option value="short">Use by today · {money(deliveryUnitCost('chilled', 'short'))}</option>
+                                <option value="long">Keeps 3 days · {money(deliveryUnitCost('chilled', 'long'))}</option>
+                              </select>
+                            </label>
+                          ))}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div className="brief-links">
+                <button type="button" className="btn-link" onClick={() => setOrder(recommendOrder(camp))}>
+                  Recommended order
+                </button>
+                <button type="button" className="btn-action" onClick={() => setAdjust(false)}>
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <ul className="cues" aria-label="Today’s basics">
+                {cues.map((c) => (
+                  <li key={c.id}>
+                    <button type="button" className={`cue ${cue === c.id ? 'on' : ''}`} aria-pressed={cue === c.id} onClick={() => setCue(cue === c.id ? null : c.id)}>
+                      <CueArt cue={c.id} />
+                      <span>{c.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p className="cue-text" aria-live="polite">
+                {active ? active.text : 'Select a picture to see where it happens.'}
+              </p>
+            </>
+          )}
+
+          <div className="order-sum">
+            <span>
+              Order <strong>{money(check.cost)}</strong>
+            </span>
+            <span>
+              Cash after <strong className={after < 0 ? 'bad' : ''}>{money(after)}</strong>
+            </span>
+            {!adjust && (
+              <button type="button" className="btn-link" onClick={() => setAdjust(true)}>
+                Adjust order
               </button>
             )}
-            <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the space and your cash.</p>
+            <button type="button" className="info-btn" aria-expanded={orderInfo} aria-label="How the order is worked out" onClick={() => setOrderInfo((x) => !x)}>
+              i
+            </button>
           </div>
-          <p className="week-goal">
-            <strong>This week:</strong> finish Saturday with business value {pounds(goal.target)}+ (now {pounds(goal.value)}), reputation {K.objective.reputation}+ (now{' '}
-            {Math.round(goal.reputation)}) and team {K.objective.wellbeing}+ (now {Math.round(goal.wellbeing)}).
-          </p>
-          <details className="more">
-            <summary>What is business value?</summary>
-            <p className="tiny">Cash, plus stock and equipment at what they cost, minus any overdraft. Buying stock or equipment moves money into the business; it doesn’t lose it.</p>
-          </details>
+          {orderInfo && <p className="report-note">Recommended from today’s forecast, the stock already in the shop, the shelf and stockroom space, and your cash.</p>}
+          <WeekGoals camp={camp} />
         </div>
       )}
     />
+  );
+}
+
+function DayMarkers({ day }: { day: number }) {
+  return (
+    <ol className="days" aria-label={`Day ${day + 1} of ${CAMPAIGN_DAYS}: ${weekdayName(day)}`}>
+      {Array.from({ length: CAMPAIGN_DAYS }, (_, i) => (
+        <li key={i} className={i < day ? 'past' : i === day ? 'today' : ''} aria-hidden="true">
+          {weekdayName(i, true)}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** "Week goals · 2 of 3 met now", opening to the three goals; the accounting behind a second control. */
+export function WeekGoals({ camp }: { camp: CampaignState }) {
+  const [open, setOpen] = useState(false);
+  const [how, setHow] = useState(false);
+  const g = campaignGoal(camp);
+  const rows = [
+    { label: 'Business value', now: pounds(g.value), target: pounds(g.target), met: g.met.value },
+    { label: 'Reputation', now: `${Math.round(g.reputation)}`, target: `${K.objective.reputation}`, met: g.met.reputation },
+    { label: 'Team wellbeing', now: `${Math.round(g.wellbeing)}`, target: `${K.objective.wellbeing}`, met: g.met.wellbeing },
+  ];
+  const met = rows.filter((r) => r.met).length;
+  return (
+    <div className="week-goals">
+      <button type="button" className="tool-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        Week goals · {met} of 3 met now
+      </button>
+      {open && (
+        <div className="wg-body">
+          <p className="report-note">Checked on Saturday night, at closing.</p>
+          <ul>
+            {rows.map((r) => (
+              <li key={r.label}>
+                <span>{r.label}</span>
+                <span>
+                  <strong>{r.now}</strong> / {r.target} <span className={r.met ? 'good' : 'muted'}>{r.met ? '✓' : '·'}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="btn-link" aria-expanded={how} onClick={() => setHow((h) => !h)}>
+            How calculated
+          </button>
+          {how && (
+            <p className="report-note">
+              Business value is cash, plus stock and equipment at what they cost, minus any overdraft. The week started at {pounds(camp.startValue)}; the goal is{' '}
+              {pounds(K.objective.growth)} more. Buying stock or equipment moves money into the business rather than spending it.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -185,15 +292,21 @@ function Qty({ label, value, onChange }: { label: string; value: number; onChang
 
 function MiniForecast({ forecast }: { forecast: number[] }) {
   const max = Math.max(...forecast);
+  const peak = forecast.indexOf(max);
+  const total = forecast.reduce((t, x) => t + x, 0);
   return (
-    <ol className="mini-forecast" aria-label={`Expected customers: ${forecast.map((f, h) => `${hourLabel(h)} ${f}`).join(', ')}`}>
-      {forecast.map((f, h) => (
-        <li key={h} aria-hidden="true">
-          <span className="mf-bar" style={{ height: `${Math.max(8, (f / max) * 100)}%` }} />
-          <span className="mf-h">{hourLabel(h).slice(0, 2)}</span>
-        </li>
-      ))}
-    </ol>
+    <figure className="mini-fc">
+      <figcaption>Expected customers · {total}</figcaption>
+      <ol className="mini-forecast" aria-label={`Expected customers: ${forecast.map((f, h) => `${hourLabel(h)} ${f}`).join(', ')}. Busiest ${hourLabel(peak)}.`}>
+        {forecast.map((f, h) => (
+          <li key={h} aria-hidden="true" className={h === peak ? 'peak' : ''}>
+            {h === peak && <span className="mf-peak">busiest</span>}
+            <span className="mf-bar" style={{ height: `${Math.max(8, (f / max) * 100)}%` }} />
+            <span className="mf-h">{hourLabel(h).slice(0, 2)}</span>
+          </li>
+        ))}
+      </ol>
+    </figure>
   );
 }
 
@@ -201,69 +314,198 @@ function MiniForecast({ forecast }: { forecast: number[] }) {
 // Closing: improvements
 // ---------------------------------------------------------------------------
 
-/** Cash and up to three relevant improvements, with the full list on request. */
-export function Offers({ camp, closed, bought, onBuy, onUndo }: { camp: CampaignState; closed: SimState; bought: UpgradeId[]; onBuy: (id: UpgradeId) => void; onUndo: (id: UpgradeId) => void }) {
-  const [all, setAll] = useState(false);
-  const last = camp.day >= CAMPAIGN_DAYS;
-  const top = topOffers(camp, closed);
-  const list = all ? allOffers(camp, closed) : top;
-  const names = allOffers({ ...camp, owned: [] }, closed);
+interface EquipInfo {
+  benefit: string;
+  before: string;
+  after: string;
+}
+
+/** Short, quantified benefits and before/after figures for each piece of equipment. */
+function equipInfo(id: EquipId): EquipInfo {
+  const U = K.upgrades;
+  switch (id) {
+    case 'till3':
+      return { benefit: `+${CONFIG.checkout.customersPerHour} customers/hour`, before: `${K.startTills} tills`, after: `${K.startTills + 1} tills` };
+    case 'shelfProduce':
+      return { benefit: `+${U.shelfProduce.extra} on display`, before: `${K.shelf.produce}`, after: `${K.shelf.produce + U.shelfProduce.extra}` };
+    case 'shelfAmbient':
+      return { benefit: `+${U.shelfAmbient.extra} on shelves`, before: `${K.shelf.ambient}`, after: `${K.shelf.ambient + U.shelfAmbient.extra}` };
+    case 'chilled':
+      return { benefit: `New range · +${CONFIG.departments.chilled.basket * K.smallChilledRange} items per shopper`, before: 'No chilled', after: `${K.shelf.chilled} on shelf` };
+    case 'shelfChilled':
+      return { benefit: 'Full range · twice the chilled sales', before: `${K.shelf.chilled}`, after: `${K.shelf.chilled + U.shelfChilled.extra}` };
+    case 'fridge':
+      return { benefit: 'No cabinet faults · half the dock spoilage', before: 'Faults possible', after: 'No faults' };
+  }
+}
+
+function shortReason(o: Offer): string {
+  if (!o.reason) return '';
+  if (o.reason.startsWith('Needs £')) return `Short of ${money(o.cost - Math.max(0, o.cashAfter + o.cost))}`;
+  if (o.reason.startsWith('Available from')) return `From ${o.reason.replace('Available from ', '').replace('.', '').slice(0, 3)}`;
+  if (o.reason.startsWith('Needs the chilled')) return 'Needs chilled';
+  if (o.reason.startsWith('Already')) return 'Installed';
+  return o.reason;
+}
+
+/** Hires as portraits and equipment as pictures; selecting one opens its details, buying is a separate action. */
+export function Investments({ camp, closed, bought, onBuy, onUndo }: { camp: CampaignState; closed: SimState; bought: UpgradeId[]; onBuy: (id: UpgradeId) => void; onUndo: (id: UpgradeId) => void }) {
+  const offers = allOffers(camp, closed);
+  // "Suggested" only when the day's results give a reason.
+  const suggested = new Set(topOffers(camp, closed).filter((o) => o.why).map((o) => o.id));
+  const [sel, setSel] = useState<UpgradeId | null>(null);
+  const hires = offers.filter((o) => o.id.startsWith('hire:'));
+  // Chilled extras appear once there is a chilled department to extend.
+  const equipment = offers.filter((o) => !o.id.startsWith('hire:') && !(o.reason ?? '').startsWith('Already') && !(o.reason ?? '').startsWith('Needs the chilled'));
+  const chosen = offers.find((o) => o.id === sel) ?? null;
+  const nextHours = dayConfig(camp.day).hours;
+  const name = (id: UpgradeId) => (id.startsWith('hire:') ? ROSTER.find((r) => r.id === id.slice(5))?.name ?? id : (K.upgrades[id as EquipId]?.name ?? id));
   return (
-    <section className="offers" aria-labelledby="offers-h">
-      <div className="offers-head">
-        <h2 id="offers-h">Improve the shop</h2>
-        <span>
-          Cash <strong>{money(camp.cash)}</strong>
-        </span>
+    <section className="invest" aria-labelledby="invest-h">
+      <div className="invest-head">
+        <h2 id="invest-h">Improve the shop</h2>
+        {bought.length > 0 && (
+          <ul className="bought">
+            {bought.map((id) => (
+              <li key={id}>
+                ✓ {id.startsWith('hire:') ? `Hired ${name(id)}` : name(id)}{' '}
+                <button type="button" className="btn-link" onClick={() => onUndo(id)}>
+                  Undo
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      {bought.length > 0 && (
-        <ul className="bought">
-          {bought.map((id) => (
-            <li key={id}>
-              ✓ {id.startsWith('hire:') ? `Hired ${ROSTER.find((r) => r.id === id.slice(5))?.name ?? id.slice(5)}` : (names.find((o) => o.id === id)?.name ?? id)}{' '}
-              <button type="button" className="btn-link" onClick={() => onUndo(id)}>
-                Undo
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {last ? null : list.length === 0 ? (
-        <p className="muted">Nothing you can buy right now. Saving is fine too.</p>
-      ) : (
-        <ul className={`offer-list ${all ? 'all' : ''}`}>
-          {list.map((o) => (
-            <OfferRow key={o.id} o={o} onBuy={() => onBuy(o.id)} />
-          ))}
-        </ul>
-      )}
-      {!last && (
-        <button type="button" className="btn-link" aria-expanded={all} onClick={() => setAll((a) => !a)}>
-          {all ? 'Show suggestions only' : 'All improvements'}
-        </button>
-      )}
+      <div className="invest-body">
+        <div className="invest-choices">
+          {hires.length > 0 && (
+            <ul className="choice-row" aria-label="People you could hire">
+              {hires.map((o) => {
+                const r = ROSTER.find((x) => x.id === o.id.slice(5))!;
+                return (
+                  <li key={o.id}>
+                    <button type="button" className={`choice ${sel === o.id ? 'on' : ''} ${o.available ? '' : 'off'}`} aria-pressed={sel === o.id} onClick={() => setSel(sel === o.id ? null : o.id)}>
+                      <Person id={r.id} />
+                      <strong>{r.name}</strong>
+                      <span className="spec">
+                        <SpecialitySymbol s={r.speciality} /> {SPECIALITY_LABEL[r.speciality]}
+                      </span>
+                      <span className="choice-cost">
+                        {pounds(o.cost)} hire · {money(CONFIG.wagePerHour)}/hour
+                      </span>
+                      {!o.available && <span className="choice-off">{shortReason(o)}</span>}
+                      {o.available && suggested.has(o.id) && <span className="choice-tag">Suggested</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <ul className="choice-row" aria-label="Equipment">
+            {equipment.map((o) => {
+              const id = o.id as EquipId;
+              return (
+                <li key={o.id}>
+                  <button type="button" className={`choice ${sel === o.id ? 'on' : ''} ${o.available ? '' : 'off'}`} aria-pressed={sel === o.id} onClick={() => setSel(sel === o.id ? null : o.id)}>
+                    <EquipArt id={id} after />
+                    <strong>{o.name}</strong>
+                    <span className="choice-benefit">{equipInfo(id).benefit}</span>
+                    <span className="choice-cost">{pounds(o.cost)}</span>
+                    {!o.available && <span className="choice-off">{shortReason(o)}</span>}
+                    {o.available && suggested.has(o.id) && <span className="choice-tag">Suggested</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <div className="invest-detail" aria-live="polite">
+          {!chosen ? (
+            <p className="muted">Select a person or a piece of equipment to see what it would do. Saving the money is fine too.</p>
+          ) : chosen.id.startsWith('hire:') ? (
+            <HireDetail o={chosen} hours={nextHours} nextDay={weekdayName(camp.day)} onBuy={() => { onBuy(chosen.id); setSel(null); }} />
+          ) : (
+            <EquipDetail o={chosen} onBuy={() => { onBuy(chosen.id); setSel(null); }} />
+          )}
+        </div>
+      </div>
     </section>
   );
 }
 
-function OfferRow({ o, onBuy }: { o: Offer; onBuy: () => void }) {
+function HireDetail({ o, hours, nextDay, onBuy }: { o: Offer; hours: number; nextDay: string; onBuy: () => void }) {
+  const r = ROSTER.find((x) => x.id === o.id.slice(5))!;
   return (
-    <li className={`offer ${o.available ? '' : 'off'}`} title={o.effect}>
-      <strong>{o.name}</strong>
-      <span className="offer-brief">{o.brief}</span>
-      {o.why && <span className="offer-why">{o.why}</span>}
-      <span className="offer-cost">
-        {money(o.cost)}
-        {o.recurring && <span className="offer-rec"> + {o.recurring}</span>}
-      </span>
+    <div className="detail">
+      <div className="detail-head">
+        <Person id={r.id} pose="stand" />
+        <div>
+          <strong>{r.name}</strong>
+          <span className="spec">
+            <SpecialitySymbol s={r.speciality} /> {SPECIALITY_LABEL[r.speciality]}
+          </span>
+        </div>
+      </div>
+      <p>{SPECIALITY_TEXT[r.speciality]}.</p>
+      <dl className="facts">
+        <dt>Hiring</dt>
+        <dd>{pounds(o.cost)} now</dd>
+        <dt>Wages {nextDay}</dt>
+        <dd>
+          about {money(CONFIG.wagePerHour * hours)} ({hours} hours)
+        </dd>
+        <dt>Cash after</dt>
+        <dd className={o.cashAfter < 0 ? 'bad' : ''}>{money(o.cashAfter)}</dd>
+      </dl>
       {o.available ? (
-        <button type="button" className="btn-action" onClick={onBuy} aria-label={`Buy ${o.name} for ${money(o.cost)}. ${o.effect} Cash after ${money(o.cashAfter)}.`}>
-          Buy · cash after {money(o.cashAfter)}
+        <button type="button" className="btn-primary" onClick={onBuy}>
+          Hire {r.name}
         </button>
       ) : (
-        <span className="offer-reason">{o.reason}</span>
+        <p className="bad">{o.reason}</p>
       )}
-    </li>
+    </div>
+  );
+}
+
+function EquipDetail({ o, onBuy }: { o: Offer; onBuy: () => void }) {
+  const id = o.id as EquipId;
+  const info = equipInfo(id);
+  return (
+    <div className="detail">
+      <strong>{o.name}</strong>
+      <div className="before-after" aria-label={`Before: ${info.before}. After: ${info.after}.`}>
+        <figure>
+          <EquipArt id={id} after={false} w={96} h={58} />
+          <figcaption>Now · {info.before}</figcaption>
+        </figure>
+        <span aria-hidden="true">→</span>
+        <figure>
+          <EquipArt id={id} after w={96} h={58} />
+          <figcaption>After · {info.after}</figcaption>
+        </figure>
+      </div>
+      <dl className="facts">
+        <dt>Cost</dt>
+        <dd>{pounds(o.cost)}</dd>
+        {o.recurring && (
+          <>
+            <dt>Running</dt>
+            <dd>{o.recurring}</dd>
+          </>
+        )}
+        <dt>Cash after</dt>
+        <dd className={o.cashAfter < 0 ? 'bad' : ''}>{money(o.cashAfter)}</dd>
+      </dl>
+      {o.available ? (
+        <button type="button" className="btn-primary" onClick={onBuy}>
+          Buy {o.name.charAt(0).toLowerCase() + o.name.slice(1)}
+        </button>
+      ) : (
+        <p className="bad">{o.reason}</p>
+      )}
+    </div>
   );
 }
 
@@ -309,13 +551,13 @@ export function ValueLines({ camp }: { camp: CampaignState }) {
 // The end of the week
 // ---------------------------------------------------------------------------
 
-export function WeekResult({ camp, picture, onNewWeek, onQuick }: { camp: CampaignState; picture: SimState | null; onNewWeek: () => void; onQuick: () => void }) {
+export function WeekResult({ camp, onNewWeek, onQuick }: { camp: CampaignState; onNewWeek: () => void; onQuick: () => void }) {
   const [report, setReport] = useState(false);
   const g = campaignGoal(camp);
   const scores = [
-    { key: 'value', label: 'Business value', display: money(g.value), target: money(g.target), met: g.met.value },
-    { key: 'rep', label: 'Reputation', display: `${Math.round(g.reputation)}`, target: `${K.objective.reputation}`, met: g.met.reputation },
-    { key: 'team', label: 'Team', display: `${Math.round(g.wellbeing)}`, target: `${K.objective.wellbeing}`, met: g.met.wellbeing },
+    { key: 'value' as const, label: 'Business value', display: pounds(g.value), target: pounds(g.target), met: g.met.value },
+    { key: 'customers' as const, label: 'Reputation', display: `${Math.round(g.reputation)}`, target: `${K.objective.reputation}`, met: g.met.reputation },
+    { key: 'staff' as const, label: 'Team wellbeing', display: `${Math.round(g.wellbeing)}`, target: `${K.objective.wellbeing}`, met: g.met.wellbeing },
   ];
   const met = scores.filter((s) => s.met).length;
   const best = [...camp.results].sort((a, b) => b.profit - a.profit)[0];
@@ -324,29 +566,27 @@ export function WeekResult({ camp, picture, onNewWeek, onQuick }: { camp: Campai
   return (
     <main className="result" id="main">
       <section className="result-card" aria-labelledby="week-h">
-        <div className="result-head">
-          {picture && <ShopPicture state={picture} label="The shop on Saturday night" />}
+        <div className="result-top">
           <div>
-            <p className="panel-kicker">The end of the week</p>
+            <p className="panel-kicker">Saturday night</p>
             <h1 id="week-h">Week complete</h1>
-            <p className="result-outcome">
-              {met} of 3 goals met
-            </p>
           </div>
+          <ul className="indicators" aria-label={`${met} of 3 goals met`}>
+            {scores.map((x) => (
+              <li key={x.key} className={x.met ? 'met' : 'missed'}>
+                <ResultIcon kind={x.key} />
+                <span className="ind-text">
+                  <span className="ind-label">{x.label}</span>
+                  <span className="ind-value">{x.display}</span>
+                  <span className="ind-target">
+                    <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> target {x.target}
+                    <span className="sr-only">{x.met ? ', met' : ', missed'}</span>
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="scores" aria-label="Scores">
-          {scores.map((x) => (
-            <li key={x.key} className={`score ${x.met ? 'met' : 'missed'}`}>
-              <span className="score-label">{x.label}</span>
-              <span className="score-value">
-                {x.display} <span className="score-target">/ {x.target}</span>
-              </span>
-              <span className="score-mark">
-                <span aria-hidden="true">{x.met ? '✓' : '✗'}</span> {x.met ? 'Met' : 'Missed'}
-              </span>
-            </li>
-          ))}
-        </ul>
         {!report && <p className="takeaway">{takeaway}</p>}
         {report && (
           <div className="report-panel">
@@ -413,10 +653,4 @@ export function FailedWeek({ camp, onRestart, onNewWeek }: { camp: CampaignState
       </section>
     </main>
   );
-}
-
-/** The closed day's shop, drawn with whatever has just been bought for tomorrow. */
-export function closingPicture(closed: SimState, campAfter: CampaignState): SimState {
-  if (campAfter.day >= CAMPAIGN_DAYS) return closed;
-  return { ...closed, ctx: { ...dayContext(campAfter), hours: closed.ctx.hours } };
 }
