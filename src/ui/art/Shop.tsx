@@ -511,18 +511,13 @@ export function ProduceArt({ fill, rows, markdown }: { fill: number; rows: numbe
 }
 
 /** Where the chilled cabinets will go, before the department is bought. */
+/** Room for chilled cabinets, before they are bought: a dashed patch with a big plus. */
 export function ExpandSpot() {
   return (
     <g aria-hidden="true">
       <rect x="862" y="172" width="120" height="98" rx="10" fill="rgba(255,240,215,0.28)" stroke={C.mustard} strokeWidth="2.5" strokeDasharray="8 6" />
-      <rect x="878" y="190" width="88" height="36" rx="6" fill={C.cream} {...ol} />
-      <text x="922" y="204" textAnchor="middle" fontSize="9.5" fontWeight="900" fill={C.burgundy} letterSpacing="1">
-        EXPAND HERE
-      </text>
-      <text x="922" y="218" textAnchor="middle" fontSize="9" fontWeight="700" fill="#5b4a3b">
-        Chilled cabinets
-      </text>
-      <rect x="918" y="226" width="8" height="34" fill={C.woodDark} />
+      <circle cx="922" cy="221" r="24" fill={C.burgundy} stroke={C.cream} strokeWidth="4" />
+      <path d="M922 208 v26 M909 221 h26" stroke={C.cream} strokeWidth="6" strokeLinecap="round" />
     </g>
   );
 }

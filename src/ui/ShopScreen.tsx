@@ -35,9 +35,11 @@ interface Props {
   notice?: { id: number; text: string } | null;
   /** Your shop: the office opens hiring. */
   office?: boolean;
+  /** Before opening: the plus in the shop opens the upgrades. */
+  onExpand?: () => void;
 }
 
-export function ShopScreen({ state, plan, live, reduced, interactive = true, panel, primary, onMove, pops, paused, floor, onAssignTask, notice, office }: Props) {
+export function ShopScreen({ state, plan, live, reduced, interactive = true, panel, primary, onMove, pops, paused, floor, onAssignTask, notice, office, onExpand }: Props) {
   const [sel, setSel] = useState<Selection>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -88,7 +90,7 @@ export function ShopScreen({ state, plan, live, reduced, interactive = true, pan
   return (
     <main className="shop" id="main">
       <div className="stage-col">
-        <div className="store-stage">
+        <div className={`store-stage ${primary ? 'with-primary' : ''}`}>
           <Store
             view={view}
             staff={onShift(state)}
@@ -107,6 +109,7 @@ export function ShopScreen({ state, plan, live, reduced, interactive = true, pan
             reducedMotion={reduced}
             bubbles={bubbles}
             glowTills={live && queueTooLong(state, plan)}
+            onExpand={onExpand}
           />
           {live && paused && !selectedStaff && (
             <p className="stage-chip stage-paused" role="status">

@@ -441,3 +441,25 @@ describe('saves', () => {
     expect(rebuild(g.record)!.state.hour).toBe(1);
   });
 });
+
+describe('the end of the day', () => {
+  it('gives one to three stars, never none', async () => {
+    const { starsFor } = await import('./highlight');
+    expect(starsFor(0)).toBe(1);
+    expect(starsFor(CONFIG.stars.two)).toBe(2);
+    expect(starsFor(CONFIG.stars.three)).toBe(3);
+    expect(starsFor(100)).toBe(3);
+  });
+  it('always has a highlight of five words or fewer', async () => {
+    const { dayHighlight } = await import('./highlight');
+    let c = newCampaign(2);
+    for (let i = 0; i < WEEK_DAYS; i++) {
+      const state = playLiveDay(startCampaignDay(c, recommendOrder(c)), sensible);
+      const done = finishDay(c, state);
+      const h = dayHighlight(state, done.result, c);
+      expect(h.text.split(/\s+/).length).toBeLessThanOrEqual(5);
+      if (h.kind === 'staff') expect(state.staff.some((s) => s.id === h.staffId)).toBe(true);
+      c = done.camp;
+    }
+  });
+});

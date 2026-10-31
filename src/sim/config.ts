@@ -460,6 +460,9 @@ export const CONFIG = {
    * and no pass or fail. Provisional values, balanced with scripted players
    * (scripts/campaign.ts); see README.
    */
+  /** End of day: stars from how happy shoppers were (satisfaction). Everyone gets at least one. */
+  stars: { two: 70, three: 82 },
+
   campaign: {
     startCash: 1500,
     /** Features unlock on these days (0 = the first Sunday), whatever the weekday. */

@@ -8,10 +8,10 @@ import type { DeptId } from '../sim/config';
 import { onShift } from '../sim/engine';
 import { BURST_TEXT, burstAtDoor, taskText } from '../sim/floor';
 import { stepOf } from '../sim/live';
-import type { AssignmentId, FloorTask, HourPlan, SimState, StaffMember } from '../sim/types';
+import type { AssignmentId, FloorTask, HourPlan, Person, SimState, StaffMember } from '../sim/types';
 import { StaffFigure } from './art/Characters';
 import { emptyShelves, queueTooLong } from './bubbles';
-import { HiringPanel, type HiringProps } from './Hiring';
+import { HireCards } from './Upgrades';
 import type { PanelContext } from './ShopScreen';
 import { staffMood } from './Store';
 
@@ -51,8 +51,8 @@ function teamWord(state: SimState, s: StaffMember, a: AssignmentId | undefined):
   return 'Filling shelves';
 }
 
-export function SidePanel({ state, plan, ctx, hiring }: { state: SimState; plan: HourPlan; ctx: PanelContext; hiring?: HiringProps }) {
-  if (ctx.sel?.kind === 'office' && hiring) {
+export function SidePanel({ state, plan, ctx, hire }: { state: SimState; plan: HourPlan; ctx: PanelContext; hire?: { people: Person[]; onHire: (p: Person) => void } }) {
+  if (ctx.sel?.kind === 'office' && hire) {
     return (
       <section className="panel-inner side-panel" aria-label="Hiring">
         <div className="card-head">
@@ -61,7 +61,17 @@ export function SidePanel({ state, plan, ctx, hiring }: { state: SimState; plan:
             ✕
           </button>
         </div>
-        <HiringPanel {...hiring} />
+        {hire.people.length ? (
+          <HireCards
+            people={hire.people}
+            onHire={(p) => {
+              hire.onHire(p);
+              ctx.setSel(null);
+            }}
+          />
+        ) : (
+          <p className="sheet-empty">Nobody looking today.</p>
+        )}
       </section>
     );
   }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CONFIG } from './sim/config';
 import { describeAction, teamSize, weekdayName } from './sim/engine';
-import { campaignPool, type CampaignState, type UpgradeId } from './sim/campaign';
+import { campaignPool, type CampaignState } from './sim/campaign';
 import { getStorage, loadMode, saveMode } from './sim/save';
 import { useCampaign } from './ui/useCampaign';
 import { useSettings } from './ui/useSettings';
@@ -10,17 +10,18 @@ import { StatusBar } from './ui/StatusBar';
 import { SidePanel } from './ui/SidePanel';
 import type { Clock } from './ui/useClock';
 import { Opening } from './ui/Opening';
-import { Closing } from './ui/Closing';
-import { dayKicker, Investments, MorningScreen, ValueLines, ValueSummary } from './ui/CampaignScreens';
+import { EndOfDay } from './ui/EndOfDay';
+import { anythingOnSale, UpgradeSheet } from './ui/Upgrades';
+import { dayHighlight, starsFor } from './sim/highlight';
+import { MorningScreen } from './ui/CampaignScreens';
 import { Help, Menu, SettingsDialog, type MenuItem } from './ui/Dialogs';
 import { ShopScreen } from './ui/ShopScreen';
 import { unlockAudio } from './ui/sound';
 import { EventDialog } from './ui/EventDialog';
-import type { HiringProps } from './ui/Hiring';
 import type { StoreFloor } from './ui/Store';
 import { BURST_TEXT, burstAtDoor, taskText } from './sim/floor';
 import { stepOf } from './sim/live';
-import type { SimState } from './sim/types';
+import type { Person, SimState } from './sim/types';
 
 type AppMode = 'home' | 'campaign';
 
@@ -30,6 +31,7 @@ interface BarInfo {
   state?: SimState;
   cash?: number;
   clock?: Clock;
+  upgrades?: { onOpen: () => void; ready: boolean };
 }
 
 export default function App() {
@@ -70,6 +72,7 @@ export default function App() {
       state={top.state}
       cash={top.cash}
       clock={top.clock}
+      upgrades={top.upgrades}
       saveOk={week.saveOk}
       onHelp={() => openDialog('help')}
       onSettings={() => openDialog('settings')}
@@ -112,32 +115,39 @@ export default function App() {
 
 function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>; reduced: boolean; bar: (top?: BarInfo) => JSX.Element }) {
   const { camp, state } = week;
+  const [sheet, setSheet] = useState(false);
   if (week.phase === 'morning')
     return (
       <>
-        {bar({ day: weekdayName(camp.day), cash: camp.cash })}
-        <MorningScreen key={`${week.record.seed}-${camp.day}`} camp={camp} onOpen={week.openShop} reduced={reduced} />
+        {bar({ day: weekdayName(camp.day), cash: camp.cash, upgrades: { onOpen: () => setSheet(true), ready: anythingOnSale(camp) } })}
+        <MorningScreen key={`${week.record.seed}-${camp.day}`} camp={camp} onOpen={week.openShop} reduced={reduced} onUpgrades={() => setSheet(true)} />
+        {sheet && (
+          <UpgradeSheet
+            camp={camp}
+            onBuy={(id) => {
+              week.buyNow(id);
+              setSheet(false);
+            }}
+            onClose={() => setSheet(false)}
+          />
+        )}
       </>
     );
   if (!state) return null;
   if (week.phase === 'closed' && week.closed) {
-    const after = week.closed.camp;
+    const { result } = week.closed;
+    const highlight = dayHighlight(state, result, camp);
     return (
       <>
-        {bar({ day: weekdayName(camp.day), cash: after.cash })}
-        <Closing
+        {bar({ day: weekdayName(camp.day), cash: week.closed.camp.cash })}
+        <EndOfDay
           key={`close-${camp.day}`}
-          state={state}
-          title={`${weekdayName(camp.day)}: closed for the day`}
-          kicker={dayKicker(camp.day)}
-          cash={after.cash}
-          wages={state.ledger.wages}
-          plain
-          targets={{ profit: 0, satisfaction: CONFIG.targets.satisfaction, wellbeing: CONFIG.targets.wellbeing }}
-          primary={{ label: `Open tomorrow: ${weekdayName(camp.day + 1)} ▶`, onClick: week.continueDay }}
-          extra={<Investments camp={after} closed={state} bought={week.pending} onBuy={(id: UpgradeId) => week.purchase(id)} onUndo={week.undoPurchase} />}
-          value={<ValueSummary camp={after} />}
-          accountsExtra={<ValueLines camp={after} />}
+          day={weekdayName(camp.day)}
+          stars={starsFor(result.satisfaction)}
+          highlight={highlight}
+          look={highlight.kind === 'staff' ? state.staff.find((s) => s.id === highlight.staffId)?.look : undefined}
+          cashChange={result.cashEnd - camp.cash}
+          onNext={week.continueDay}
         />
       </>
     );
@@ -154,16 +164,14 @@ function ShopView({ week, reduced, bar }: { week: ReturnType<typeof useCampaign>
 function LiveScreen({ day, state, reduced, camp }: { day: LiveDay; state: SimState; reduced: boolean; camp?: CampaignState }) {
   const plan = day.live!.plan;
   // Your shop: the office's candidates (anyone hired today is off the list).
-  const hiring: HiringProps | undefined = camp
+  // Your shop: people looking for work, while there's room in the team and cash for the fee.
+  const hire = camp
     ? {
-        candidates: campaignPool(camp).filter((p) => !state.hires?.some((h) => h.person.id === p.id) && !state.staff.some((s) => s.id === p.id)),
-        teamSize: teamSize(state),
-        teamLimit: state.ctx.teamLimit ?? CONFIG.hiring.teamLimit,
-        cash: state.cash,
-        step: stepOf(state),
-        hours: state.ctx.hours,
-        onHire: (p) => void day.apply({ ...plan, actions: [{ kind: 'hire', person: p }] }),
-        reasonFor: (p) => describeAction(state, { kind: 'hire', person: p }).reason,
+        people:
+          teamSize(state) < (state.ctx.teamLimit ?? CONFIG.hiring.teamLimit)
+            ? campaignPool(camp).filter((p) => !state.hires?.some((h) => h.person.id === p.id) && !state.staff.some((s) => s.id === p.id) && describeAction(state, { kind: 'hire', person: p }).available)
+            : [],
+        onHire: (p: Person) => void day.apply({ ...plan, actions: [{ kind: 'hire', person: p }] }),
       }
     : undefined;
   const pending = state.floor?.pending ?? null;
@@ -179,8 +187,8 @@ function LiveScreen({ day, state, reduced, camp }: { day: LiveDay; state: SimSta
       onMove={day.move}
       pops={day.pops}
       paused={day.clock.paused}
-      panel={(ctx) => <SidePanel state={state} plan={plan} ctx={ctx} hiring={hiring} />}
-      office={!!camp}
+      panel={(ctx) => <SidePanel state={state} plan={plan} ctx={ctx} hire={hire} />}
+      office={!!hire && hire.people.length > 0}
       floor={storeFloor(state)}
       onAssignTask={day.assignTask}
       notice={day.toast}

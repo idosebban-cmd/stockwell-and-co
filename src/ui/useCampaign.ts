@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { afterClose, newCampaignRecord, nextDay, phaseOf, replayToday, restartDay, type CampaignRecord, type UpgradeId } from '../sim/campaign';
+import { afterClose, buy, newCampaignRecord, nextDay, phaseOf, replayToday, restartDay, type CampaignRecord, type UpgradeId } from '../sim/campaign';
 import { randomSeed } from '../sim/rng';
 import { clearCampaign, loadCampaign, saveCampaign, type StorageLike } from '../sim/save';
 import type { SetupPlan } from '../sim/types';
@@ -38,12 +38,8 @@ export function useCampaign(storage: StorageLike | null, sound: boolean) {
   }, []);
 
   const openShop = useCallback((setup: SetupPlan) => begin({ ...record, today: { setup, choices: [], minute: 0 }, purchases: [] }), [record, begin]);
-  const purchase = useCallback((id: UpgradeId) => setRecord((r) => ({ ...r, purchases: [...r.purchases, id] })), []);
-  const undoPurchase = useCallback(
-    // Undoing the chilled department also undoes what depends on it.
-    (id: UpgradeId) => setRecord((r) => ({ ...r, purchases: r.purchases.filter((x) => !(id === 'chilled' ? ['chilled', 'shelfChilled', 'fridge'] : [id]).includes(x)) })),
-    [],
-  );
+  /** Before opening: buys an upgrade or hires someone; it shows in the shop at once. */
+  const buyNow = useCallback((id: UpgradeId) => setRecord((r) => (r.today ? r : { ...r, camp: buy(r.camp, id) })), []);
   const continueDay = useCallback(() => {
     if (day.live && phase === 'closed') begin(nextDay(record, day.live.state));
   }, [day.live, phase, record, begin]);
@@ -70,12 +66,10 @@ export function useCampaign(storage: StorageLike | null, sound: boolean) {
     notice,
     dismissNotice: () => setNotice(null),
     openShop,
-    purchase,
-    undoPurchase,
+    buyNow,
     continueDay,
     restart,
     newShop,
-    pending: phase === 'closed' ? record.purchases : [],
   };
 }
 

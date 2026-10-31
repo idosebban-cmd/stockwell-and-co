@@ -111,6 +111,8 @@ interface Props {
   bubbles?: ShopBubble[];
   /** A long queue and a closed till: the closed till glows. */
   glowTills?: boolean;
+  /** Before opening: the plus where chilled cabinets could go opens the upgrades. */
+  onExpand?: () => void;
 }
 
 export interface StoreFloor {
@@ -286,6 +288,24 @@ function StoreImpl(props: Props) {
         );
       })}
 
+      {props.onExpand && fit.cabinets === 0 && (
+        <circle
+          className="expand-btn"
+          cx="922"
+          cy="221"
+          r="30"
+          tabIndex={0}
+          role="button"
+          aria-label="Upgrades"
+          onClick={props.onExpand}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              props.onExpand!();
+            }
+          }}
+        />
+      )}
       {props.office && interactive && !selected && (
         <rect
           className={`zone zone-browse ${props.office.open ? 'zone-context' : ''}`}
